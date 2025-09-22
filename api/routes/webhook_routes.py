@@ -3056,7 +3056,7 @@ async def handle_ghl_new_contact_trigger(request: Request):
             if not service_category:
                 # No fallback - this is a data quality issue that needs attention
                 service_category = "Uncategorized"
-                logger.error(f"❌ No service category found for contact {contact.get('id')} - marking as Uncategorized")
+                logger.error(f"❌ No service category found for contact {contact_id} - marking as Uncategorized")
                 # TODO: Trigger admin notification here
             
             logger.info(f"📌 Using service category from mapping: {service_category}")

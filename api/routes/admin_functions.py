@@ -20,6 +20,79 @@ from config import AppConfig
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Functions"])
 
+@router.post("/sync-single-vendor/{contact_id}")
+async def sync_single_vendor(contact_id: str):
+    """
+    Sync a single vendor contact from GHL to local database
+    Uses the same sync logic as full database sync but for one record
+    
+    This endpoint can be called by GHL webhook when a vendor contact is updated
+    """
+    try:
+        logger.info(f"🔄 Single vendor sync initiated for GHL contact: {contact_id}")
+        
+        # Import the enhanced sync V2 module
+        from api.services.enhanced_db_sync_v2 import EnhancedDatabaseSync
+        
+        # Initialize the sync service
+        sync_service = EnhancedDatabaseSync()
+        
+        # Fetch the specific contact from GHL
+        ghl_contact = sync_service.ghl_api.get_contact_by_id(contact_id)
+        if not ghl_contact:
+            logger.error(f"❌ Contact {contact_id} not found in GHL")
+            return {
+                "status": "error",
+                "success": False,
+                "message": f"Contact {contact_id} not found in GHL"
+            }
+        
+        # Get account ID
+        account = simple_db_instance.get_account_by_ghl_location_id(AppConfig.GHL_LOCATION_ID)
+        if not account:
+            logger.error("❌ No account found")
+            return {
+                "status": "error",
+                "success": False,
+                "message": "No account configured"
+            }
+        
+        # Check if vendor exists locally
+        vendor_email = ghl_contact.get('email', '')
+        if vendor_email:
+            existing_vendor = simple_db_instance.get_vendor_by_email_and_account(vendor_email, account['id'])
+        else:
+            existing_vendor = simple_db_instance.get_vendor_by_ghl_contact_id(contact_id)
+        
+        if existing_vendor:
+            # Update existing vendor using the same logic as full sync
+            sync_service._update_local_vendor(existing_vendor, ghl_contact)
+            action = "updated"
+        else:
+            # Create new vendor if not exists
+            sync_service._create_local_vendor(ghl_contact)
+            action = "created"
+        
+        logger.info(f"✅ Single vendor sync completed: {action}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "message": f"Vendor {action} successfully from GHL contact {contact_id}",
+            "contact_id": contact_id,
+            "action": action,
+            "vendor_email": vendor_email
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in single vendor sync: {e}")
+        return {
+            "status": "error",
+            "success": False,
+            "message": f"Sync failed: {str(e)}",
+            "error": str(e)
+        }
+
 @router.post("/sync-database")
 async def sync_database():
     """

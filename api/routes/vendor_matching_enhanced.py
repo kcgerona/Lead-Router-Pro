@@ -12,9 +12,9 @@ import json
 from database.simple_connection import db
 from config import AppConfig
 from api.services.lead_routing_service import LeadRoutingService
-from test_scripts.comprehensive_service_mappings import (
-    DOCKSIDE_PROS_SERVICE_CATEGORIES,
-    SPECIFIC_SERVICES_BY_CATEGORY
+from api.services.service_categories import (
+    SERVICE_CATEGORIES,
+    LEVEL_3_SERVICES
 )
 
 router = APIRouter()
@@ -29,10 +29,10 @@ class EnhancedVendorMatchingRequest(BaseModel):
 
 @router.get("/service-categories")
 async def get_all_service_categories():
-    """Get all available service categories"""
+    """Get all available service categories (Level 1)"""
     try:
-        # Get unique categories from the mapping
-        categories = list(set(DOCKSIDE_PROS_SERVICE_CATEGORIES.values()))
+        # Get Level 1 categories from SERVICE_CATEGORIES
+        categories = list(SERVICE_CATEGORIES.keys())
         categories.sort()
         
         return {
@@ -46,34 +46,31 @@ async def get_all_service_categories():
 
 @router.get("/service-categories/{category}/services")
 async def get_services_for_category(category: str):
-    """Get specific services for a category"""
+    """Get specific services for a category (Level 2 and Level 3)"""
     try:
-        services_data = SPECIFIC_SERVICES_BY_CATEGORY.get(category, [])
+        # Get Level 2 services from SERVICE_CATEGORIES
+        level2_services = SERVICE_CATEGORIES.get(category, [])
         
-        # Handle both simple lists and nested dictionaries
-        if isinstance(services_data, dict):
-            # Category has subcategories
+        # Check if this category has Level 3 services
+        level3_data = LEVEL_3_SERVICES.get(category, {})
+        
+        if level3_data:
+            # Category has Level 3 services
             return {
                 "status": "success",
                 "category": category,
-                "has_subcategories": True,
-                "services": services_data.get("Main", []),
-                "subcategories": {k: v for k, v in services_data.items() if k != "Main"}
-            }
-        elif isinstance(services_data, list):
-            # Simple list of services
-            return {
-                "status": "success",
-                "category": category,
-                "has_subcategories": False,
-                "services": services_data
+                "has_level3": True,
+                "level2_services": level2_services,
+                "level3_services": level3_data
             }
         else:
+            # Only Level 2 services (these are the specific services for this category)
             return {
                 "status": "success",
                 "category": category,
-                "has_subcategories": False,
-                "services": []
+                "has_level3": False,
+                "level2_services": level2_services,
+                "level3_services": {}
             }
             
     except Exception as e:
@@ -100,13 +97,21 @@ async def test_vendor_matching_enhanced(request: EnhancedVendorMatchingRequest):
         
         account_id = account["id"]
         
+        # IMPORTANT: Determine which service to match on
+        # If there's a Level 3 service (additional_service), use that
+        # Otherwise use the Level 2 service (specific_service)
+        service_to_match = additional_service if additional_service else specific_service
+        
+        logger.info(f"Vendor matching request - Category: {service_category}, Level 2: {specific_service}, Level 3: {additional_service}")
+        logger.info(f"Service to match: {service_to_match}")
+        
         # Use the existing lead routing service to find matching vendors
         # This uses the same logic as the actual lead routing system
         matching_vendors_raw = lead_routing_service.find_matching_vendors(
             account_id=account_id,
             service_category=service_category,
             zip_code=zip_code,
-            specific_service=specific_service  # Pass specific service for exact matching
+            specific_service=service_to_match  # Pass the most specific service for exact matching
         )
         
         # Format vendors for display
@@ -132,18 +137,28 @@ async def test_vendor_matching_enhanced(request: EnhancedVendorMatchingRequest):
         
         # Build response message
         if matching_vendors:
-            message = f"Found {len(matching_vendors)} vendor(s) for {service_category}"
-            if specific_service:
-                message += f" - {specific_service}"
+            message = f"Found {len(matching_vendors)} vendor(s) for "
             if additional_service:
-                message += f" - {additional_service}"
+                # Level 3 service was searched
+                message += f"{service_category} → {specific_service} → {additional_service}"
+            elif specific_service:
+                # Level 2 service was searched
+                message += f"{service_category} → {specific_service}"
+            else:
+                # Only category was searched
+                message += f"{service_category}"
             message += f" in ZIP code {zip_code}"
         else:
-            message = f"No vendors found for {service_category}"
-            if specific_service:
-                message += f" - {specific_service}"
+            message = f"No vendors found for "
             if additional_service:
-                message += f" - {additional_service}"
+                # Level 3 service was searched
+                message += f"{service_category} → {specific_service} → {additional_service}"
+            elif specific_service:
+                # Level 2 service was searched
+                message += f"{service_category} → {specific_service}"
+            else:
+                # Only category was searched
+                message += f"{service_category}"
             message += f" in ZIP code {zip_code}"
         
         return {

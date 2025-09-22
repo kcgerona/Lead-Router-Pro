@@ -639,11 +639,12 @@ Create Fields from CSV
         const baseURL = window.location.origin;
 
         // Initialize dashboard
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             checkSystemStatus();
             loadDashboardStats();
             loadRoutingConfiguration();
             loadCurrentFields();
+            await fetchServiceDetails(); // Fetch service hierarchy from API
             initializeServiceCategories(); // Initialize service categories for vendor matching
         });
 
@@ -775,93 +776,42 @@ Create Fields from CSV
             "Yacht Management"
         ];
 
-        // Service details mapping - matches comprehensive_service_mappings.py
-        const serviceDetails = {
-            "Boat Maintenance": [
-                "Ceramic Coating", "Boat Detailing", "Bottom Cleaning", "Oil Change",
-                "Bilge Cleaning", "Jet Ski Maintenance", "Barnacle Cleaning",
-                "Fire Detection Systems", "Boat Wrapping or Marine Protection Film", "Other"
-            ],
-            "Boat and Yacht Repair": {
-                "Main": ["Fiberglass Repair", "Welding & Metal Fabrication", "Carpentry & Woodwork",
-                         "Teak or Woodwork", "Riggers & Masts", "Jet Ski Repair",
-                         "Canvas or Upholstery", "Boat Decking", "Other"],
-                "Fiberglass Repair": ["Hull Crack or Structural Repair", "Gelcoat Repair and Color Matching",
-                               "Transom Repair & Reinforcement", "Deck Delamination & Soft Spot Repair",
-                               "Stringer & Bulkhead Repair", "Other"],
-                "Welding & Metal Fabrication": ["Aluminum or Stainless Steel Hull Repairs",
-                                                 "Custom Railings, Ladders or Boarding Equipment",
-                                                 "T-Tops, Hardtops or Bimini Frames",
-                                                 "Fuel or Water Tank Fabrication",
-                                                 "Exhaust, Engine Bed or Structural Reinforcement", "Other"],
-                "Canvas or Upholstery": ["Upholstery", "Canvas or Sunshade", "Trim and Finish",
-                                         "Boat Cover or T-Top", "Acrylic or Strataglass Enclosures", "Other"],
-                "Boat Decking": ["SeaDek", "Real Teak Wood", "Cork", "Synthetic Teak",
-                                 "Vinyl Flooring", "Tile Flooring", "Other"]
-            },
-            "Engines and Generators": {
-                "Main": ["Outboard Engine Service", "Outboard Engine Sales", "Inboard Engine Service",
-                         "Inboard Engine Sales", "Diesel Engine Service", "Diesel Engine Sales",
-                         "Generator Service", "Generator Sales"],
-                "Generator Service": ["Generator Installation", "Routine Generator Maintenance",
-                                      "Electrical System Integration & Transfer Switches",
-                                      "Diagnostics & Repairs", "Sound Shielding & Vibration Control"],
-                "Outboard Engine Service": ["New Engine Sales", "Engine Refit", "Routine Engine Maintenance",
-                                            "Cooling System Service", "Fuel System Cleaning & Repair",
-                                            "Engine Diagnostics & Troubleshooting"]
-            },
-            "Marine Systems": {
-                "Main": ["Stabilizers or Seakeepers", "Instrument Panel and Dashboard",
-                         "AC Sales or Service", "Electrical Service", "Sound System",
-                         "Plumbing", "Lighting", "Refrigeration or Watermakers"],
-                "AC Sales or Service": ["New AC Install or Replacement", "AC Maintenance & Servicing",
-                                        "Refrigerant Charging & Leak Repair", "Pump & Water Flow Troubleshooting",
-                                        "Thermostat & Control Panel Upgrades"],
-                "Electrical Service": ["Battery System Install or Maintenance", "Wiring & Rewiring",
-                                       "Shore Power & Inverter Systems", "Lighting Systems",
-                                       "Electrical Panel & Breaker", "Navigation & Communication",
-                                       "Generator Electrical Integration", "Solar Power & Battery Charging"]
-            },
-            "Boat Charters and Rentals": {
-                "Main": ["Weekly or Monthly Yacht or Catamaran Charter", "Daily Yacht or Catamaran Charter",
-                         "Sailboat Charter", "Fishing Charter", "Party Boat Charter", "Pontoon Charter",
-                         "Jet Ski Rental", "Paddleboard Rental", "Kayak Rental",
-                         "eFoil, Kiteboarding or Wing Surfing Lessons", "Boat Club"],
-                "Fishing Charter": ["Inshore Fishing Charter", "Offshore (Deep Sea) Fishing Charter",
-                                   "Reef & Wreck Fishing Charter", "Drift Boat Charter",
-                                   "Freshwater Fishing Charter", "Private Party Boat Charter"]
-            },
-            "Docks, Seawalls and Lifts": {
-                "Main": ["Dock and Seawall Builders or Repair", "Boat Lift Installers",
-                         "Floating Dock Sales", "Davit and Hydraulic Platform"],
-                "Dock and Seawall Builders or Repair": ["Seawall Construction or Repair", "New Dock",
-                                                        "Dock Repair", "Pilings or Structural Support",
-                                                        "Floating Docks", "Boat Lift", "Seawall or Piling Cleaning"]
-            },
-            "Boat Towing": ["Get Emergency Tow", "Get Towing Membership"],
-            "Fuel Delivery": ["Dyed Diesel Fuel (For Boats)", "Regular Diesel Fuel (Landside Business)",
-                             "Rec 90 (Ethanol Free Gas)"],
-            "Dock and Slip Rental": ["Private Dock", "Boat Slip", "Marina", "Mooring Ball"],
-            "Yacht Management": ["Full Service Vessel Management", "Technical Management",
-                                "Crew Management", "Accounting & Financial Management",
-                                "Insurance & Risk Management", "Regulatory Compliance"],
-            "Boater Resources": ["Boat or Yacht Parts", "Vessel WiFi or Communications", "Provisioning",
-                                "Boat Salvage", "Photography or Videography", "Crew Management",
-                                "Account Management and Bookkeeping", "Marketing or Web Design"],
-            "Buying or Selling a Boat": ["Boat Insurance", "Yacht Insurance", "Yacht Broker",
-                                         "Boat Broker", "Boat Financing", "Boat Surveyors",
-                                         "Yacht Dealers", "Boat Dealers"],
-            "Maritime Education and Training": ["Yacht, Sailboat or Catamaran On Water Training",
-                                               "Interested In Buying a Boat/Insurance Signoff",
-                                               "Maritime Academy", "Sailing Schools", "Captains License"],
-            "Waterfront Property": ["Buy a Waterfront Home or Condo", "Sell a Waterfront Home or Condo",
-                                   "Buy a Waterfront New Development", "Rent a Waterfront Property"],
-            "Wholesale or Dealer Product Pricing": ["Apparel", "Boat Accessories",
-                                                   "Boat Maintenance & Cleaning Products",
-                                                   "Boat Safety Products", "Diving Equipment",
-                                                   "Dock Accessories", "Fishing Gear",
-                                                   "Personal Watercraft", "Other"]
-        };
+        // Service details will be fetched dynamically from API
+        let serviceDetails = {};
+        
+        // Fetch service details from API on page load
+        async function fetchServiceDetails() {
+            try {
+                // Fetch all categories first
+                const categoriesResponse = await fetch(`${baseURL}/api/v1/vendor-matching/service-categories`);
+                const categoriesData = await categoriesResponse.json();
+                
+                if (categoriesData.status === 'success') {
+                    // For each category, fetch its services
+                    for (const category of categoriesData.categories) {
+                        const servicesResponse = await fetch(`${baseURL}/api/v1/vendor-matching/service-categories/${encodeURIComponent(category)}/services`);
+                        const servicesData = await servicesResponse.json();
+                        
+                        if (servicesData.status === 'success') {
+                            if (servicesData.has_level3) {
+                                // Category has Level 3 services
+                                // Store Level 2 services as "Main" and Level 3 services separately
+                                serviceDetails[category] = {
+                                    "Main": servicesData.level2_services,
+                                    ...servicesData.level3_services
+                                };
+                            } else {
+                                // Category only has Level 2 services (no Level 3)
+                                serviceDetails[category] = servicesData.level2_services;
+                            }
+                        }
+                    }
+                    console.log('Service details loaded:', serviceDetails);
+                }
+            } catch (error) {
+                console.error('Error fetching service details:', error);
+            }
+        }
 
         // Initialize service categories dropdown
         function initializeServiceCategories() {

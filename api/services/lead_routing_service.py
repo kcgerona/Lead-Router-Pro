@@ -300,8 +300,33 @@ class LeadRoutingService:
                 logger.warning(f"Vendor {vendor_name} has malformed coverage_states: {coverage_states}")
                 return False
             
-            # Check if target state is in coverage states
-            matches = target_state in coverage_states
+            # Map of state codes to full names for matching flexibility
+            state_mapping = {
+                'FL': 'Florida', 'CA': 'California', 'NY': 'New York', 'TX': 'Texas',
+                'GA': 'Georgia', 'NC': 'North Carolina', 'SC': 'South Carolina',
+                'AL': 'Alabama', 'LA': 'Louisiana', 'MS': 'Mississippi', 'TN': 'Tennessee',
+                'KY': 'Kentucky', 'VA': 'Virginia', 'MD': 'Maryland', 'NJ': 'New Jersey',
+                'PA': 'Pennsylvania', 'OH': 'Ohio', 'MI': 'Michigan', 'IN': 'Indiana',
+                'IL': 'Illinois', 'WI': 'Wisconsin', 'MO': 'Missouri', 'AR': 'Arkansas'
+            }
+            
+            # Check if target state matches any coverage state (handle both codes and full names)
+            matches = False
+            for coverage_state in coverage_states:
+                coverage_state_clean = coverage_state.strip()
+                # Direct match (code to code or name to name)
+                if target_state == coverage_state_clean:
+                    matches = True
+                    break
+                # Check if target is code and coverage is full name
+                if target_state in state_mapping and state_mapping[target_state] == coverage_state_clean:
+                    matches = True
+                    break
+                # Check if target matches when looked up as full name
+                if target_state == state_mapping.get(coverage_state_clean):
+                    matches = True
+                    break
+            
             logger.debug(f"{'✅' if matches else '❌'} Vendor {vendor_name} STATE coverage check: {target_state} in {coverage_states} = {matches}")
             return matches
         
@@ -314,24 +339,49 @@ class LeadRoutingService:
                 logger.warning(f"Vendor {vendor_name} has malformed coverage_counties: {coverage_counties}")
                 return False
             
-            # Build the full county string to match against vendor's coverage
-            full_county_string = f"{target_county}, {target_state}"
+            # Map of state codes to full names for matching flexibility
+            state_mapping = {
+                'FL': 'Florida', 'CA': 'California', 'NY': 'New York', 'TX': 'Texas',
+                'GA': 'Georgia', 'NC': 'North Carolina', 'SC': 'South Carolina',
+                'AL': 'Alabama', 'LA': 'Louisiana', 'MS': 'Mississippi', 'TN': 'Tennessee',
+                'KY': 'Kentucky', 'VA': 'Virginia', 'MD': 'Maryland', 'NJ': 'New Jersey',
+                'PA': 'Pennsylvania', 'OH': 'Ohio', 'MI': 'Michigan', 'IN': 'Indiana',
+                'IL': 'Illinois', 'WI': 'Wisconsin', 'MO': 'Missouri', 'AR': 'Arkansas'
+            }
+            
+            # Build possible county string formats to match
+            county_formats = [
+                f"{target_county}, {target_state}",  # "Broward, FL"
+                f"{target_county} County, {target_state}",  # "Broward County, FL"
+                f"{target_county}, {state_mapping.get(target_state, target_state)}",  # "Broward, Florida"
+                f"{target_county} County, {state_mapping.get(target_state, target_state)}"  # "Broward County, Florida"
+            ]
             
             for coverage_area in coverage_counties:
-                # Direct string comparison for exact match
-                if coverage_area.strip() == full_county_string:
-                    logger.debug(f"✅ Vendor {vendor_name} COUNTY match: '{full_county_string}' in vendor's coverage")
-                    return True
+                coverage_clean = coverage_area.strip()
+                
+                # Check all possible formats
+                for county_format in county_formats:
+                    if coverage_clean.lower() == county_format.lower():
+                        logger.debug(f"✅ Vendor {vendor_name} COUNTY match: '{coverage_clean}' matches '{county_format}'")
+                        return True
                 
                 # Also try component matching for flexibility
                 if ',' in coverage_area:
                     county_part, state_part = coverage_area.split(',', 1)
-                    if (target_county.lower() == county_part.strip().lower() and
-                        target_state.lower() == state_part.strip().lower()):
-                        logger.debug(f"✅ Vendor {vendor_name} COUNTY component match: {target_county}, {target_state}")
-                        return True
+                    county_part_clean = county_part.strip().replace(' County', '').replace(' county', '')
+                    state_part_clean = state_part.strip()
+                    
+                    # Check if county matches (with or without "County" suffix)
+                    if target_county.lower() == county_part_clean.lower():
+                        # Check state match (code or full name)
+                        if (target_state == state_part_clean or
+                            state_mapping.get(target_state) == state_part_clean or
+                            target_state == state_mapping.get(state_part_clean)):
+                            logger.debug(f"✅ Vendor {vendor_name} COUNTY component match: {target_county}, {target_state}")
+                            return True
             
-            logger.debug(f"❌ Vendor {vendor_name} COUNTY coverage: no match for {full_county_string} in {coverage_counties}")
+            logger.debug(f"❌ Vendor {vendor_name} COUNTY coverage: no match for {target_county}, {target_state} in {coverage_counties}")
             return False
         
         if coverage_type == 'zip':

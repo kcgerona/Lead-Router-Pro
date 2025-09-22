@@ -380,7 +380,12 @@ class EnhancedDatabaseSync:
                         new_value = temp_value
                         break
             else:
-                new_value = custom_fields.get(ghl_field, '').strip()
+                # Handle both string and numeric values from GHL
+                raw_value = custom_fields.get(ghl_field, '')
+                if isinstance(raw_value, str):
+                    new_value = raw_value.strip()
+                else:
+                    new_value = str(raw_value) if raw_value else ''
             
             # Special handling for certain fields
             if db_field in ['service_categories', 'services_offered']:
@@ -390,10 +395,15 @@ class EnhancedDatabaseSync:
             elif db_field == 'lead_close_percentage':
                 if new_value:
                     try:
+                        # Log the raw value from GHL
+                        logger.info(f"   📊 Processing lead_close_percentage: raw value = '{new_value}'")
                         new_value = float(new_value.replace('%', '').strip())
-                    except:
+                        logger.info(f"   📊 Parsed lead_close_percentage: {new_value}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️ Failed to parse lead_close_percentage '{new_value}': {e}")
                         new_value = 0.0
                 else:
+                    logger.info(f"   📊 No lead_close_percentage value from GHL")
                     new_value = 0.0
             elif db_field == 'taking_new_work':
                 if new_value:
@@ -403,6 +413,12 @@ class EnhancedDatabaseSync:
             # Compare and add to updates if different
             if new_value and self._values_differ(current_value, new_value, db_field):
                 updates[db_field] = new_value
+                logger.info(f"   🔄 Field '{db_field}' will update: '{current_value}' → '{new_value}'")
+        
+        if updates:
+            logger.info(f"   📝 Total updates to apply: {len(updates)} fields")
+        else:
+            logger.info(f"   ✅ No updates needed - vendor is up to date")
         
         return updates
     
@@ -735,7 +751,12 @@ class EnhancedDatabaseSync:
                 elif db_field == 'customer_phone':
                     new_value = ghl_contact.get('phone', '').strip()
             else:
-                new_value = custom_fields.get(ghl_field, '').strip()
+                # Handle both string and numeric values from GHL
+                raw_value = custom_fields.get(ghl_field, '')
+                if isinstance(raw_value, str):
+                    new_value = raw_value.strip()
+                else:
+                    new_value = str(raw_value) if raw_value else ''
             
             if new_value and current_value != new_value:
                 updates[db_field] = new_value
