@@ -16,7 +16,7 @@ from database.simple_connection import db as simple_db_instance
 from api.services.ghl_api_v2_optimized import OptimizedGoHighLevelAPI
 from api.services.lead_routing_service import lead_routing_service
 from api.services.location_service import location_service
-from api.services.field_mapper import field_mapper
+from api.services.service_dictionary_mapper import ServiceDictionaryMapper
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class LeadReassignmentCore:
         )
         self.lead_routing = lead_routing_service
         self.location_service = location_service
-        self.field_mapper = field_mapper
+        self.service_mapper = ServiceDictionaryMapper()
     
     async def reassign_lead(
         self,
@@ -98,11 +98,51 @@ class LeadReassignmentCore:
             else:
                 # FALLBACK: Try to extract from GHL contact custom fields
                 logger.info(f"📋 No existing lead - attempting to extract from GHL contact")
-                mapped_data = self.field_mapper.map_payload(contact_details, industry="marine")
                 
-                service_category = mapped_data.get('primary_service_category', '')
-                specific_service = mapped_data.get('specific_service_needed', '')
-                zip_code = mapped_data.get('zip_code_of_service', '')
+                # Extract custom fields directly
+                custom_fields_dict = {}
+                for field in contact_details.get('customFields', []):
+                    field_id = field.get('id')
+                    field_value = field.get('value')
+                    if field_id and field_value:
+                        custom_fields_dict[field_id] = field_value
+                
+                # Use ServiceDictionaryMapper for mapping
+                mapping_result = self.service_mapper.map_payload_to_service(contact_details)
+                mapped_data = mapping_result.get('standardized_fields', {})
+                
+                # SIMPLIFIED: Direct extraction without hierarchy complexity
+                # Priority 1: Get from known GHL field IDs
+                LEAD_FIELD_IDS = {
+                    'primary_service_category': 'HRqfv0HnUydNRLKWhk27',
+                    'specific_service_needed': 'FT85QGi0tBq1AfVGNJ9v'
+                }
+                
+                # Get specific service directly - this is what matters for vendor matching
+                specific_service = custom_fields_dict.get(LEAD_FIELD_IDS['specific_service_needed'], '') or \
+                                  mapped_data.get('specific_service_needed', '')
+                
+                # Get primary category if available
+                service_category = custom_fields_dict.get(LEAD_FIELD_IDS['primary_service_category'], '') or \
+                                 mapped_data.get('primary_service_category', '')
+                
+                # If no category but have specific service, try to infer category
+                if not service_category and specific_service:
+                    from api.services.service_categories import SERVICE_CATEGORIES, LEVEL_3_SERVICES
+                    for cat, services in SERVICE_CATEGORIES.items():
+                        if specific_service in services:
+                            service_category = cat
+                            break
+                    if not service_category:
+                        for cat, subcats in LEVEL_3_SERVICES.items():
+                            for subcat, l3_services in subcats.items():
+                                if specific_service in l3_services:
+                                    service_category = cat
+                                    break
+                            if service_category:
+                                break
+                
+                zip_code = mapped_data.get('zip_code_of_service', '') or contact_details.get('postalCode', '')
                 service_county = ""
                 service_state = ""
                 

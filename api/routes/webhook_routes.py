@@ -3161,18 +3161,44 @@ async def handle_ghl_new_contact_trigger(request: Request):
             specific_service = custom_data.get('specific_service_requested')
             logger.info(f"📌 Using specific service from customData: '{specific_service}'")
         
-        # Determine the proper service hierarchy
-        hierarchy_result = determine_service_hierarchy(primary_category, specific_service)
-        service_category = hierarchy_result['primary_service_category']
-        final_specific_service = hierarchy_result['specific_service_requested']
+        # SIMPLIFIED: Just use the specific service directly for vendor matching
+        # We don't need complex hierarchy logic - vendors are matched by specific service
+        final_specific_service = specific_service  # Use whatever service was extracted
         
-        if not service_category:
-            # No fallback - this is a data quality issue that needs attention
-            service_category = "Uncategorized"
-            logger.error(f"❌ No service category found for contact {contact_id} - marking as Uncategorized")
-            # TODO: Trigger admin notification here
+        # For the primary category, use what we have or try to infer from service
+        if primary_category:
+            service_category = primary_category
+        elif specific_service:
+            # Try to find which category this service belongs to
+            from api.services.service_categories import SERVICE_CATEGORIES, LEVEL_3_SERVICES
+            service_category = None
+            
+            # Check Level 2 services
+            for cat, services in SERVICE_CATEGORIES.items():
+                if specific_service in services:
+                    service_category = cat
+                    logger.info(f"📌 Inferred category '{cat}' from Level 2 service '{specific_service}'")
+                    break
+            
+            # Check Level 3 services if not found
+            if not service_category:
+                for cat, subcats in LEVEL_3_SERVICES.items():
+                    for subcat, level3_services in subcats.items():
+                        if specific_service in level3_services:
+                            service_category = cat
+                            logger.info(f"📌 Inferred category '{cat}' from Level 3 service '{specific_service}'")
+                            break
+                    if service_category:
+                        break
+            
+            if not service_category:
+                service_category = "Uncategorized"
+                logger.warning(f"⚠️ Could not infer category for service '{specific_service}'")
         else:
-            logger.info(f"✅ Final service category: {service_category}, specific service: {final_specific_service}")
+            service_category = "Uncategorized"
+            logger.error(f"❌ No service information found for contact {contact_id}")
+        
+        logger.info(f"✅ Final: category='{service_category}', specific_service='{final_specific_service}'")
         
         # Extract ZIP code - check customData first, then mapped payload and contact details
         zip_code = custom_data.get("customer_zip_code") or \
