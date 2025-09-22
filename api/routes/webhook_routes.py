@@ -18,7 +18,7 @@ from config import AppConfig
 from database.simple_connection import db as simple_db_instance
 from api.services.ghl_api import GoHighLevelAPI
 from api.services.ghl_api_v2_optimized import OptimizedGoHighLevelAPI
-from api.services.field_mapper import field_mapper
+# REMOVED: from api.services.field_mapper import field_mapper  # OLD - can't handle GHL nested customFields
 from api.services.lead_routing_service import lead_routing_service
 from api.services.location_service import location_service
 from api.services.service_mapper import (
@@ -28,6 +28,13 @@ from api.services.service_mapper import (
     DOCKSIDE_PROS_CATEGORIES,
     DOCKSIDE_PROS_SERVICES,
     FORM_TO_SPECIFIC_SERVICE
+)
+# NEW: Proper mappers for GHL custom fields and service hierarchy
+from api.services.service_dictionary_mapper import ServiceDictionaryMapper
+from api.services.service_categories import (
+    SERVICE_CATEGORIES, 
+    LEVEL_3_SERVICES,
+    service_manager
 )
 
 # Import the new service dictionary mapper for intelligent field consolidation
@@ -60,6 +67,124 @@ async def get_counties_by_state(state_code: str):
             "counties": []
         }
 
+# ============================================================================
+# NEW EXTRACTION FUNCTIONS FOR PROPER GHL CUSTOM FIELDS HANDLING
+# ============================================================================
+
+def extract_ghl_custom_fields(contact_details: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Extract GHL custom fields from nested array structure to flat dictionary.
+    
+    Args:
+        contact_details: GHL contact data with customFields array
+        
+    Returns:
+        Flat dictionary with field_id -> value mappings
+    """
+    custom_fields_dict = {}
+    custom_fields = contact_details.get('customFields', [])
+    
+    for field in custom_fields:
+        field_id = field.get('id')
+        field_value = field.get('value')
+        if field_id and field_value:  # Only include non-empty values
+            custom_fields_dict[field_id] = field_value
+            
+    logger.info(f"📋 Extracted {len(custom_fields_dict)} custom fields from GHL contact")
+    return custom_fields_dict
+
+def map_ghl_contact_to_lead(contact_details: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Map GHL contact data to standardized lead format using ServiceDictionaryMapper.
+    
+    Args:
+        contact_details: GHL contact data
+        
+    Returns:
+        Mapped payload with standardized service information
+    """
+    from api.services.service_dictionary_mapper import ServiceDictionaryMapper
+    
+    # Extract custom fields into flat dictionary
+    custom_fields_dict = extract_ghl_custom_fields(contact_details)
+    
+    # Combine standard fields with custom fields for mapping
+    combined_payload = {
+        **contact_details,  # Standard fields like firstName, lastName, email
+        **custom_fields_dict  # Flattened custom fields with field IDs as keys
+    }
+    
+    # Use ServiceDictionaryMapper to map the fields properly
+    mapper = ServiceDictionaryMapper()
+    mapping_result = mapper.map_payload_to_service(combined_payload)
+    
+    logger.info(f"🔄 ServiceDictionaryMapper result: {mapping_result.get('service_classification', {})}")
+    
+    return mapping_result
+
+def determine_service_hierarchy(primary_category: str, specific_service: str) -> Dict[str, str]:
+    """
+    Determine the correct service hierarchy based on Level 1 category and specific service.
+    For categories WITHOUT Level 3 services, the Level 2 service IS the specific_service_requested.
+    
+    Args:
+        primary_category: Level 1 category (e.g., "Boat Maintenance")
+        specific_service: Level 2 or 3 service (e.g., "Boat Oil Change")
+        
+    Returns:
+        Dictionary with properly classified service levels
+    """
+    from api.services.service_categories import SERVICE_CATEGORIES, LEVEL_3_SERVICES
+    
+    result = {
+        'primary_service_category': primary_category or '',
+        'specific_service_requested': '',
+        'service_level': 'unknown'
+    }
+    
+    if not primary_category:
+        logger.warning("⚠️ No primary category provided for service hierarchy determination")
+        return result
+        
+    # Check if this category has Level 3 services
+    if primary_category in LEVEL_3_SERVICES:
+        # This category has Level 3, need to check if specific_service is Level 2 or 3
+        level3_map = LEVEL_3_SERVICES.get(primary_category, {})
+        
+        # Check if it's a Level 3 service
+        for level2_service, level3_list in level3_map.items():
+            if specific_service in level3_list:
+                result['specific_service_requested'] = specific_service
+                result['service_level'] = 'level3'
+                logger.info(f"✅ Identified Level 3 service: {specific_service} under {level2_service}")
+                return result
+                
+        # Not Level 3, might be Level 2 subcategory
+        if specific_service in level3_map:
+            # It's a Level 2 subcategory, not specific enough
+            result['service_level'] = 'level2_subcategory'
+            logger.warning(f"⚠️ {specific_service} is a Level 2 subcategory, need Level 3 for specific service")
+        else:
+            logger.warning(f"⚠️ {specific_service} not found in Level 3 services for {primary_category}")
+            
+    else:
+        # No Level 3 for this category, so Level 2 IS the specific service
+        if specific_service in SERVICE_CATEGORIES.get(primary_category, []):
+            result['specific_service_requested'] = specific_service
+            result['service_level'] = 'level2'
+            logger.info(f"✅ Category {primary_category} has no Level 3 - using Level 2 service: {specific_service}")
+        else:
+            logger.warning(f"⚠️ {specific_service} not found in Level 2 services for {primary_category}")
+            
+    return result
+
+# Known GHL field IDs for lead routing (from field_reference.json)
+LEAD_ROUTING_FIELD_IDS = {
+    'primary_service_category': 'HRqfv0HnUydNRLKWhk27',  # Level 1 category for routing
+    'specific_service_needed': 'FT85QGi0tBq1AfVGNJ9v',    # Level 2/3 specific service
+    # DO NOT USE 'O84LyhN1QjZ8Zz5mteCM' - that's for vendor service capabilities!
+}
+
 async def create_lead_from_ghl_contact(
     ghl_contact_data: Dict[str, Any],
     account_id: str,
@@ -79,12 +204,14 @@ async def create_lead_from_ghl_contact(
             "phone": ghl_contact_data.get("phone", "")
         }
         
-        # Step 2: Apply field mapping (same as webhook system)
-        mapped_payload = field_mapper.map_payload(ghl_contact_data, industry="marine")
-        logger.info(f"🔄 Shared pipeline field mapping. Original keys: {list(ghl_contact_data.keys())}, Mapped keys: {list(mapped_payload.keys())}")
+        # Step 2: Apply field mapping using new ServiceDictionaryMapper
+        mapping_result = map_ghl_contact_to_lead(ghl_contact_data)
+        mapped_payload = mapping_result.get('standardized_fields', {})
+        service_classification = mapping_result.get('service_classification', {})
+        logger.info(f"🔄 ServiceDictionaryMapper field mapping. Original keys: {list(ghl_contact_data.keys())}, Mapped keys: {list(mapped_payload.keys())}")
         
-        # Step 3: Service classification (reuse webhook logic)
-        service_category = get_direct_service_category(form_identifier)
+        # Step 3: Service classification from mapping result
+        service_category = service_classification.get('level1_category') or get_direct_service_category(form_identifier)
         
         # Step 4: ZIP → County conversion (critical for routing)
         zip_code = mapped_payload.get("zip_code_of_service", "")
@@ -874,9 +1001,12 @@ def process_payload_to_ghl_format(elementor_payload: Dict[str, Any], form_config
     Process Elementor payload into GHL format - PRESERVE ALL FIELDS
     Direct field mapping only - NO AI processing
     """
-    # Apply field mapping first to convert form field names to GHL field names
-    mapped_payload = field_mapper.map_payload(elementor_payload, industry="marine")
-    logger.info(f"🔄 Applied field mapping. Original keys: {list(elementor_payload.keys())}, Mapped keys: {list(mapped_payload.keys())}")
+    # Apply field mapping using ServiceDictionaryMapper
+    mapper = ServiceDictionaryMapper()
+    mapping_result = mapper.map_payload_to_service(elementor_payload)
+    mapped_payload = mapping_result.get('standardized_fields', {})
+    service_classification = mapping_result.get('service_classification', {})
+    logger.info(f"🔄 Applied ServiceDictionaryMapper. Original keys: {list(elementor_payload.keys())}, Mapped keys: {list(mapped_payload.keys())}")
     
     final_ghl_payload = {}
     custom_fields_array = []
@@ -2132,9 +2262,11 @@ async def trigger_clean_lead_routing_workflow(
             "phone": form_data.get("phone", "")
         }
         
-        # FIXED CODE - Use field mapping system like contact creation (works for all 16 form types)
-        mapped_payload = field_mapper.map_payload(form_data, industry="marine")
-        logger.info(f"🔄 Lead creation using field mapping. Original keys: {list(form_data.keys())}, Mapped keys: {list(mapped_payload.keys())}")
+        # FIXED CODE - Use ServiceDictionaryMapper like contact creation
+        mapper = ServiceDictionaryMapper()
+        mapping_result = mapper.map_payload_to_service(form_data)
+        mapped_payload = mapping_result.get('standardized_fields', {})
+        logger.info(f"🔄 Lead creation using ServiceDictionaryMapper. Original keys: {list(form_data.keys())}, Mapped keys: {list(mapped_payload.keys())}")
         
         # Create service_details from ALL mapped fields (preserves all form data)
         service_details = {}
@@ -2985,81 +3117,62 @@ async def handle_ghl_new_contact_trigger(request: Request):
         customer_email = contact_details.get('email', '')
         customer_phone = contact_details.get('phone', '')
         
-        # Apply field mapping to extract service information
-        mapped_payload = field_mapper.map_payload(contact_details, industry="marine")
-        logger.info(f"🔄 Field mapping complete. Mapped keys: {list(mapped_payload.keys())}")
+        # NEW: Apply proper field mapping using ServiceDictionaryMapper
+        # First extract custom fields into flat dictionary
+        custom_fields_dict = extract_ghl_custom_fields(contact_details)
         
-        # Extract service category - check enhanced metadata first, then customData, then custom fields
-        service_category = None
+        # Map using ServiceDictionaryMapper
+        mapping_result = map_ghl_contact_to_lead(contact_details)
+        mapped_payload = mapping_result.get('standardized_fields', {})
+        service_classification = mapping_result.get('service_classification', {})
+        logger.info(f"🔄 ServiceDictionaryMapper complete. Service classification: {service_classification}")
         
-        # First check if we have routing_category from enhanced service mapping
-        if custom_data.get('routing_category'):
-            service_category = custom_data.get('routing_category')
-            logger.info(f"📌 Using enhanced service category from mapping: '{service_category}'")
-        # Then check if we have specific_service_requested in customData
-        elif custom_data.get('specific_service_requested', ''):
-            specific_service = custom_data.get('specific_service_requested', '')
-            
-            # Import service hierarchies
-            from api.services.service_categories import LEVEL_3_SERVICES, SERVICE_CATEGORIES
-            
-            # First check if this is a Level 3 service and map to parent category
-            level3_found = False
-            for parent_category, subcategories in LEVEL_3_SERVICES.items():
-                for subcategory, level3_list in subcategories.items():
-                    if specific_service in level3_list:
-                        service_category = parent_category
-                        logger.info(f"📌 Mapped Level 3 service '{specific_service}' to parent category '{service_category}'")
-                        level3_found = True
-                        break
-                if level3_found:
-                    break
-            
-            # If not Level 3, check if it's a Level 2 service
-            if not level3_found:
-                level2_found = False
-                for parent_category, services_list in SERVICE_CATEGORIES.items():
-                    if specific_service in services_list:
-                        service_category = parent_category
-                        logger.info(f"📌 Mapped Level 2 service '{specific_service}' to parent category '{service_category}'")
-                        level2_found = True
-                        break
-                
-                # If not Level 2 or 3, try mapping as form identifier (last resort)
-                if not level2_found:
-                    service_category = get_direct_service_category(specific_service.lower().replace(' ', '_'))
-                    logger.warning(f"⚠️ '{specific_service}' not found in Level 2/3 services, attempted form mapping to '{service_category}'")
+        # Extract service information using proper field IDs
+        primary_category = None
+        specific_service = None
         
-        # If not found in customData, check custom fields
+        # First try to get from the known GHL field IDs
+        if LEAD_ROUTING_FIELD_IDS['primary_service_category'] in custom_fields_dict:
+            primary_category = custom_fields_dict[LEAD_ROUTING_FIELD_IDS['primary_service_category']]
+            logger.info(f"✅ Found primary category from GHL field: '{primary_category}'")
+            
+        if LEAD_ROUTING_FIELD_IDS['specific_service_needed'] in custom_fields_dict:
+            specific_service = custom_fields_dict[LEAD_ROUTING_FIELD_IDS['specific_service_needed']]
+            logger.info(f"✅ Found specific service from GHL field: '{specific_service}'")
+        
+        # Fallback to ServiceDictionaryMapper results if not found in GHL fields
+        if not primary_category:
+            primary_category = service_classification.get('level1_category')
+            if primary_category:
+                logger.info(f"📌 Using primary category from ServiceDictionaryMapper: '{primary_category}'")
+        
+        if not specific_service:
+            # Check Level 3 first, then Level 2
+            specific_service = service_classification.get('level3_specific') or service_classification.get('level2_service')
+            if specific_service:
+                logger.info(f"📌 Using specific service from ServiceDictionaryMapper: '{specific_service}'")
+        
+        # Check custom data for fallback
+        if not primary_category and custom_data.get('routing_category'):
+            primary_category = custom_data.get('routing_category')
+            logger.info(f"📌 Using primary category from customData: '{primary_category}'")
+            
+        if not specific_service and custom_data.get('specific_service_requested'):
+            specific_service = custom_data.get('specific_service_requested')
+            logger.info(f"📌 Using specific service from customData: '{specific_service}'")
+        
+        # Determine the proper service hierarchy
+        hierarchy_result = determine_service_hierarchy(primary_category, specific_service)
+        service_category = hierarchy_result['primary_service_category']
+        final_specific_service = hierarchy_result['specific_service_requested']
+        
         if not service_category:
-            custom_fields = contact_details.get('customFields', [])
-            
-            # Look for service category in various possible field names
-            service_field_names = ['service_type', 'service_requested', 'service_category', 
-                                  'primary_service_category', 'service', 'category']
-            
-            for field in custom_fields:
-                field_name = field.get('name', '').lower().replace(' ', '_')
-                field_value = field.get('value', '')
-                
-                if any(name in field_name for name in service_field_names) and field_value:
-                    service_category = field_value
-                    logger.info(f"📌 Found service category '{service_category}' in field '{field.get('name')}'")
-                    break
-        
-        # If no service category found, check mapped payload
-        if not service_category:
-            service_category = mapped_payload.get('primary_service_category') or \
-                             mapped_payload.get('service_category') or \
-                             mapped_payload.get('service_type')
-            
-            if not service_category:
-                # No fallback - this is a data quality issue that needs attention
-                service_category = "Uncategorized"
-                logger.error(f"❌ No service category found for contact {contact_id} - marking as Uncategorized")
-                # TODO: Trigger admin notification here
-            
-            logger.info(f"📌 Using service category from mapping: {service_category}")
+            # No fallback - this is a data quality issue that needs attention
+            service_category = "Uncategorized"
+            logger.error(f"❌ No service category found for contact {contact_id} - marking as Uncategorized")
+            # TODO: Trigger admin notification here
+        else:
+            logger.info(f"✅ Final service category: {service_category}, specific service: {final_specific_service}")
         
         # Extract ZIP code - check customData first, then mapped payload and contact details
         zip_code = custom_data.get("customer_zip_code") or \
@@ -3152,7 +3265,7 @@ async def handle_ghl_new_contact_trigger(request: Request):
                 customer_email.lower().strip() if customer_email else None, # customer_email
                 customer_phone,                                             # customer_phone
                 service_category,                                           # primary_service_category
-                mapped_payload.get("specific_service_requested", ""),       # specific_service_requested
+                final_specific_service or "",                               # specific_service_requested (properly extracted)
                 zip_code,                                                   # service_zip_code
                 service_county,                                             # service_county
                 service_state,                                              # service_state
@@ -3233,18 +3346,15 @@ async def handle_ghl_new_contact_trigger(request: Request):
         vendor_assigned = False
         selected_vendor = None
         
-        # Get specific service if available - check customData first
-        specific_service = custom_data.get("specific_service_requested") or \
-                          mapped_payload.get("specific_service_requested", "")
-        
-        logger.info(f"🔍 Finding matching vendors for {service_category} in {zip_code}")
+        # Use the properly extracted specific service from our hierarchy determination
+        logger.info(f"🔍 Finding matching vendors for {service_category} (specific: {final_specific_service}) in {zip_code}")
         
         available_vendors = lead_routing_service.find_matching_vendors(
             account_id=account_id,
             service_category=service_category,
             zip_code=zip_code,
             priority="normal",
-            specific_service=specific_service
+            specific_service=final_specific_service or ""
         )
         
         if available_vendors:
