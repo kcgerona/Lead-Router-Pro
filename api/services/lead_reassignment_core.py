@@ -115,7 +115,8 @@ class LeadReassignmentCore:
                 # Priority 1: Get from known GHL field IDs
                 LEAD_FIELD_IDS = {
                     'primary_service_category': 'HRqfv0HnUydNRLKWhk27',
-                    'specific_service_needed': 'FT85QGi0tBq1AfVGNJ9v'
+                    'specific_service_needed': 'FT85QGi0tBq1AfVGNJ9v',
+                    'zip_code_of_service': 'y3Xo7qsFEQumoFugTeCq'
                 }
                 
                 # Get specific service directly - this is what matters for vendor matching
@@ -142,13 +143,28 @@ class LeadReassignmentCore:
                             if service_category:
                                 break
                 
-                zip_code = mapped_data.get('zip_code_of_service', '') or contact_details.get('postalCode', '')
+                # Try multiple sources for ZIP code
+                zip_code = (
+                    custom_fields_dict.get(LEAD_FIELD_IDS.get('zip_code_of_service', ''), '') or
+                    mapped_data.get('zip_code_of_service', '') or 
+                    mapped_data.get('customer_zip_code', '') or
+                    custom_fields_dict.get('zip_code_of_service', '') or
+                    custom_fields_dict.get('customer_zip_code', '') or
+                    contact_details.get('postalCode', '') or
+                    contact_details.get('address1', '')[-5:] if contact_details.get('address1') and len(contact_details.get('address1', '')) >= 5 else ''
+                )
+                
+                # Clean up zip code - ensure it's 5 digits
+                if zip_code:
+                    zip_code = str(zip_code).strip()
+                    # Extract 5-digit ZIP from longer strings
+                    import re
+                    zip_match = re.search(r'\b(\d{5})\b', zip_code)
+                    if zip_match:
+                        zip_code = zip_match.group(1)
+                    
                 service_county = ""
                 service_state = ""
-                
-                if not zip_code:
-                    # Try to get from contact address
-                    zip_code = contact_details.get('address1', '')[-5:] if contact_details.get('address1') else ''
             
             if not service_category and not specific_service:
                 return {

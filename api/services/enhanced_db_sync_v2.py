@@ -57,7 +57,7 @@ class EnhancedDatabaseSync:
         'customer_phone': 'phone',
         'primary_service_category': 'HRqfv0HnUydNRLKWhk27',
         'specific_service_requested': 'FT85QGi0tBq1AfVGNJ9v',
-        'customer_zip_code': 'RmAja1dnU0u42ECXhCo9'
+        # Note: No standard ZIP field in GHL custom fields - need to check postalCode
     }
     
     def __init__(self):
@@ -225,16 +225,27 @@ class EnhancedDatabaseSync:
                 for contact in contacts:
                     contact_id = contact.get('id')
                     
-                    # Check if this is a vendor (has GHL User ID field)
+                    # Check if this is a vendor using multiple criteria
                     custom_fields = {cf['id']: cf.get('value', '') 
                                    for cf in contact.get('customFields', [])}
                     
+                    # Check multiple vendor indicators:
+                    # 1. Has GHL User ID field (most reliable if present)
                     ghl_user_id = custom_fields.get('HXVNT4y8OynNokWAfO2D', '')
                     
-                    # If has GHL User ID, it's an active vendor
-                    if ghl_user_id:
+                    # 2. Has vendor-specific tags
+                    tags = [tag.lower() for tag in contact.get('tags', [])]
+                    has_vendor_tag = any('vendor' in tag or 'service provider' in tag for tag in tags)
+                    
+                    # 3. Has service categories field populated (vendors offer services)
+                    service_categories = custom_fields.get('O84LyhN1QjZ8Zz5mteCM', '')  # Service Categories field
+                    
+                    # Consider as vendor if ANY of these conditions are met
+                    is_vendor = bool(ghl_user_id or has_vendor_tag or service_categories)
+                    
+                    if is_vendor:
                         all_vendors[contact_id] = contact
-                        logger.debug(f"   Found vendor: {contact.get('firstName')} {contact.get('lastName')}")
+                        logger.debug(f"   Found vendor: {contact.get('firstName')} {contact.get('lastName')} (GHL_ID: {bool(ghl_user_id)}, Tag: {has_vendor_tag}, Services: {bool(service_categories)})")
                 
                 total_fetched += len(contacts)
                 self.stats['ghl_contacts_fetched'] = total_fetched
@@ -304,9 +315,14 @@ class EnhancedDatabaseSync:
                 self._create_local_vendor(ghl_contact)
         
         # PART 2: Handle vendors that exist locally but not in GHL (deleted/missing)
-        for ghl_id, local_vendor in local_vendors.items():
-            if ghl_id not in processed_ghl_ids:
-                # Vendor exists locally but not in GHL
+        missing_vendors = [v for ghl_id, v in local_vendors.items() if ghl_id not in processed_ghl_ids]
+        
+        if missing_vendors:
+            logger.info(f"📊 Found {len(missing_vendors)} vendors not in GHL sync results")
+            logger.info("These will be flagged as 'missing_in_ghl' for admin review")
+            
+            # Flag all missing vendors for review (not deleting)
+            for local_vendor in missing_vendors:
                 self._handle_missing_ghl_vendor(local_vendor)
     
     def _update_local_vendor(self, local_vendor: Dict, ghl_contact: Dict):
@@ -500,27 +516,24 @@ class EnhancedDatabaseSync:
     
     def _handle_missing_ghl_vendor(self, local_vendor: Dict):
         """
-        Handle vendor that exists locally but not in GHL
-        Options:
-        1. Mark as inactive/deleted
-        2. Delete from local DB
-        3. Log for manual review
+        Handle vendor that exists locally but not in GHL.
+        Instead of deleting, flag as 'missing_in_ghl' for admin review.
+        Admin can then bulk delete through the dashboard.
         """
         try:
             vendor_name = local_vendor.get('name', 'Unknown')
-            logger.warning(f"⚠️  Vendor exists locally but not in GHL: {vendor_name}")
+            logger.warning(f"⚠️  Vendor exists locally but not found in GHL sync: {vendor_name}")
             
-            # Option 1: Mark as inactive (safer approach)
-            updates = {'status': 'inactive_ghl_deleted'}
+            # Flag as missing instead of deleting
+            updates = {'status': 'missing_in_ghl'}
             success = self._update_vendor_record(local_vendor['id'], updates)
             
             if success:
-                self.stats['vendors_deactivated'] += 1
-                logger.info(f"🔴 Deactivated vendor (deleted from GHL): {vendor_name}")
+                self.stats['vendors_missing_in_ghl'] = self.stats.get('vendors_missing_in_ghl', 0) + 1
+                logger.info(f"🔍 Flagged vendor as missing in GHL: {vendor_name} (admin review needed)")
             
-            # Option 2: Actually delete (more aggressive)
-            # simple_db_instance.delete_vendor(local_vendor['id'])
-            # self.stats['vendors_deleted'] += 1
+            # DO NOT auto-delete or deactivate
+            # Admin will review and decide through dashboard
             
         except Exception as e:
             logger.error(f"❌ Error handling missing vendor: {e}")
@@ -761,13 +774,35 @@ class EnhancedDatabaseSync:
             if new_value and current_value != new_value:
                 updates[db_field] = new_value
         
+        # Try to extract ZIP from standard GHL contact fields (not custom fields)
+        zip_code = None
+        
+        # Check standard postalCode field first
+        if ghl_contact.get('postalCode'):
+            zip_code = str(ghl_contact.get('postalCode'))
+        # Check address field for embedded ZIP (last 5 digits)
+        elif ghl_contact.get('address1'):
+            import re
+            zip_match = re.search(r'\b(\d{5})\b', ghl_contact.get('address1', ''))
+            if zip_match:
+                zip_code = zip_match.group(1)
+        
+        # Update ZIP if found and different
+        if zip_code and lead.get('service_zip_code') != zip_code:
+            updates['service_zip_code'] = zip_code
+            
         # Handle ZIP to county/state conversion
-        if updates.get('customer_zip_code'):
+        zip_to_convert = updates.get('service_zip_code') or lead.get('service_zip_code')
+        if zip_to_convert and len(str(zip_to_convert)) == 5:
             from api.services.location_service import location_service
-            location_data = location_service.zip_to_location(updates['customer_zip_code'])
+            location_data = location_service.zip_to_location(str(zip_to_convert))
             if not location_data.get('error'):
-                updates['service_county'] = location_data.get('county', '')
-                updates['service_state'] = location_data.get('state', '')
+                county = location_data.get('county', '')
+                state = location_data.get('state', '')
+                if county and not lead.get('service_county'):
+                    updates['service_county'] = county
+                if state and not lead.get('service_state'):
+                    updates['service_state'] = state
         
         return updates
     

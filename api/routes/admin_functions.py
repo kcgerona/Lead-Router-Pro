@@ -580,6 +580,160 @@ async def delete_script(script_name: str):
         logger.error(f"Error deleting script {script_name}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete script: {str(e)}")
 
+@router.post("/vendors/bulk-action")
+async def bulk_vendor_action(request: Dict[str, Any]):
+    """
+    Perform bulk actions on multiple vendors.
+    
+    Request body:
+    {
+        "action": "delete" | "activate" | "deactivate" | "restore",
+        "vendor_ids": ["vendor_id_1", "vendor_id_2", ...],
+        "filter": {  // Optional: alternative to vendor_ids
+            "status": "missing_in_ghl" | "inactive_ghl_deleted" | "active" | "inactive"
+        }
+    }
+    """
+    try:
+        action = request.get("action")
+        vendor_ids = request.get("vendor_ids", [])
+        filter_criteria = request.get("filter", {})
+        
+        if not action:
+            raise HTTPException(status_code=400, detail="Action is required")
+        
+        if not vendor_ids and not filter_criteria:
+            raise HTTPException(status_code=400, detail="Either vendor_ids or filter must be provided")
+        
+        # Get vendors to process
+        if filter_criteria:
+            # Fetch vendors by filter
+            status_filter = filter_criteria.get("status")
+            if status_filter:
+                conn = simple_db_instance._get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM vendors WHERE status = ?", (status_filter,))
+                vendor_ids = [row[0] for row in cursor.fetchall()]
+                conn.close()
+                logger.info(f"Found {len(vendor_ids)} vendors with status '{status_filter}'")
+        
+        if not vendor_ids:
+            return {
+                "status": "success",
+                "message": "No vendors to process",
+                "processed": 0
+            }
+        
+        # Perform the action
+        processed = 0
+        errors = []
+        
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        try:
+            for vendor_id in vendor_ids:
+                try:
+                    if action == "delete":
+                        # Hard delete from database
+                        cursor.execute("DELETE FROM vendors WHERE id = ?", (vendor_id,))
+                        logger.info(f"Deleted vendor {vendor_id}")
+                    
+                    elif action == "activate":
+                        # Set status to active
+                        cursor.execute(
+                            "UPDATE vendors SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (vendor_id,)
+                        )
+                        logger.info(f"Activated vendor {vendor_id}")
+                    
+                    elif action == "deactivate":
+                        # Set status to inactive
+                        cursor.execute(
+                            "UPDATE vendors SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (vendor_id,)
+                        )
+                        logger.info(f"Deactivated vendor {vendor_id}")
+                    
+                    elif action == "restore":
+                        # Restore vendors marked as deleted/missing
+                        cursor.execute(
+                            "UPDATE vendors SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('inactive_ghl_deleted', 'missing_in_ghl')",
+                            (vendor_id,)
+                        )
+                        logger.info(f"Restored vendor {vendor_id}")
+                    
+                    else:
+                        raise ValueError(f"Unknown action: {action}")
+                    
+                    processed += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing vendor {vendor_id}: {e}")
+                    errors.append({"vendor_id": vendor_id, "error": str(e)})
+            
+            conn.commit()
+            
+        finally:
+            conn.close()
+        
+        return {
+            "status": "success",
+            "message": f"Bulk action '{action}' completed",
+            "processed": processed,
+            "failed": len(errors),
+            "errors": errors if errors else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in bulk vendor action: {e}")
+        raise HTTPException(status_code=500, detail=f"Bulk action failed: {str(e)}")
+
+@router.get("/vendors/missing-in-ghl")
+async def get_missing_vendors():
+    """
+    Get list of vendors flagged as missing in GHL.
+    These vendors need admin review.
+    """
+    try:
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, email, company_name, ghl_contact_id, 
+                   service_categories, updated_at, status
+            FROM vendors 
+            WHERE status IN ('missing_in_ghl', 'inactive_ghl_deleted')
+            ORDER BY updated_at DESC
+        """)
+        
+        vendors = []
+        for row in cursor.fetchall():
+            vendors.append({
+                "id": row[0],
+                "name": row[1],
+                "email": row[2],
+                "company_name": row[3],
+                "ghl_contact_id": row[4],
+                "service_categories": json.loads(row[5]) if row[5] else [],
+                "updated_at": row[6],
+                "status": row[7]
+            })
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "count": len(vendors),
+            "vendors": vendors
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching missing vendors: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch vendors: {str(e)}")
+
 @router.get("/health")
 async def admin_health_check():
     """Health check for admin functions"""

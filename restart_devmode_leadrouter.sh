@@ -1,11 +1,11 @@
 #!/bin/bash
-# Lead Router Pro - Quick Restart Script (Dev Mode) with Dependency Management
-# Automatically stops service, checks dependencies, and restarts in dev mode
+# Lead Router Pro - Quick Restart Script (Dev Mode) with Auto-Restart Protection
+# Automatically stops service, checks dependencies, and restarts in dev mode with crash recovery
 
 set -e  # Exit on error
 
-echo "🔄 Lead Router Pro - Restart Script (Dev Mode)"
-echo "============================================="
+echo "🔄 Lead Router Pro - Restart Script (Dev Mode with Auto-Restart)"
+echo "================================================================"
 echo "Timestamp: $(date)"
 
 # Configuration
@@ -13,12 +13,13 @@ APP_DIR="/root/Lead-Router-Pro"
 LOG_DIR="/var/log/leadrouter"
 LOG_FILE="$LOG_DIR/devmode.log"
 PYTHON_EXEC="/root/Lead-Router-Pro/venv/bin/python"
+AUTO_RESTART=${AUTO_RESTART:-"true"}  # Enable auto-restart by default
 
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
 
 # DISABLE AUTOMATED MONITORING FOR DEV MODE
-echo "🔧 Disabling automated monitoring for development mode..."
+echo "🔧 Configuring monitoring for development mode..."
 
 # Stop the systemd service if it's running
 if systemctl is-active --quiet leadrouter; then
@@ -37,6 +38,8 @@ if crontab -l 2>/dev/null | grep -q "monitor_leadrouter.sh"; then
 fi
 
 echo ""
+echo "🛡️ AUTO-RESTART PROTECTION: $AUTO_RESTART"
+echo ""
 
 # Function to log messages
 log_message() {
@@ -48,6 +51,9 @@ log_message() {
 kill_port_process() {
     local port=$1
     log_message "⏹️  Stopping any process on port $port..."
+    
+    # Kill any uvicorn processes first
+    pkill -f "uvicorn main_working_final:app" 2>/dev/null || true
     
     # Get PIDs of processes on the port
     local pids=$(lsof -ti :$port 2>/dev/null || true)
@@ -211,25 +217,78 @@ log_message "   - Auto-reload is ENABLED (changes will restart server)"
 log_message "   - Press Ctrl+C to stop"
 log_message ""
 
-# Create a wrapper script for better process management
-cat > /tmp/leadrouter_dev_runner.sh << 'EOF'
+# Function to run server with auto-restart on crash
+run_with_autorestart() {
+    local restart_count=0
+    local max_restart_attempts=10
+    local restart_delay=5
+    
+    while [ "$AUTO_RESTART" = "true" ]; do
+        log_message "🔥 Starting server (attempt $((restart_count + 1)))..."
+        
+        # Create a wrapper script for better process management
+        cat > /tmp/leadrouter_dev_runner.sh << 'EOF'
 #!/bin/bash
 cd /root/Lead-Router-Pro
 source venv/bin/activate
 exec python -m uvicorn main_working_final:app --host 0.0.0.0 --port 8000 --log-level debug --reload
 EOF
-chmod +x /tmp/leadrouter_dev_runner.sh
+        chmod +x /tmp/leadrouter_dev_runner.sh
+        
+        # Start the server and capture exit code
+        /tmp/leadrouter_dev_runner.sh 2>&1 | tee -a "$LOG_FILE"
+        EXIT_CODE=${PIPESTATUS[0]}
+        
+        # Clean up
+        rm -f /tmp/leadrouter_dev_runner.sh
+        
+        # Check exit code
+        if [ $EXIT_CODE -eq 0 ]; then
+            log_message "✅ Server stopped normally (exit code 0)"
+            break
+        elif [ $EXIT_CODE -eq 130 ]; then
+            log_message "🛑 Server stopped by user (Ctrl+C)"
+            break
+        else
+            restart_count=$((restart_count + 1))
+            log_message "❌ Server crashed with exit code: $EXIT_CODE"
+            
+            if [ $restart_count -ge $max_restart_attempts ]; then
+                log_message "⚠️ Maximum restart attempts ($max_restart_attempts) reached!"
+                log_message "   Server appears to be in a crash loop."
+                log_message "   Please check the logs and fix the issue."
+                break
+            fi
+            
+            log_message "🔄 Auto-restarting in $restart_delay seconds..."
+            log_message "   (Press Ctrl+C to cancel auto-restart)"
+            
+            # Allow interruption during wait
+            for i in $(seq $restart_delay -1 1); do
+                echo -ne "\r   Restarting in $i seconds... "
+                sleep 1
+            done
+            echo ""
+        fi
+    done
+}
 
-# Start the application in dev mode with reload
-log_message "🔥 Starting with auto-reload (development mode)..."
+# Start the application in dev mode with auto-restart protection
+log_message "🔥 Starting with auto-reload and crash protection (development mode)..."
 log_message "📋 Logs are being written to: $LOG_FILE"
+log_message "   - Auto-restart on crash: $AUTO_RESTART"
+log_message "   - To disable auto-restart: export AUTO_RESTART=false"
 log_message ""
 
-# Run with explicit error handling
-/tmp/leadrouter_dev_runner.sh 2>&1 | tee -a "$LOG_FILE"
-
-# Clean up
-rm -f /tmp/leadrouter_dev_runner.sh
+# Run with auto-restart protection
+if [ "$AUTO_RESTART" = "true" ]; then
+    run_with_autorestart
+else
+    # Single run without auto-restart
+    cd /root/Lead-Router-Pro
+    source venv/bin/activate
+    exec python -m uvicorn main_working_final:app --host 0.0.0.0 --port 8000 --log-level debug --reload 2>&1 | tee -a "$LOG_FILE"
+fi
 
 # If we get here, the server was stopped
 log_message ""

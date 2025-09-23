@@ -3276,12 +3276,12 @@ async def handle_ghl_new_contact_trigger(request: Request):
                 INSERT INTO leads (
                     id, account_id, ghl_contact_id, ghl_opportunity_id, customer_name,
                     customer_email, customer_phone, primary_service_category, specific_service_requested,
-                    service_zip_code, service_county, service_state, vendor_id, 
+                    customer_zip_code, service_zip_code, service_county, service_state, vendor_id, 
                     status, priority, source, service_details, 
                     created_at, updated_at, service_city, 
                     service_complexity, estimated_duration, requires_emergency_response, 
                     classification_confidence, classification_reasoning
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
             ''', (
                 lead_id,                                                    # id
                 account_id,                                                 # account_id
@@ -3292,6 +3292,7 @@ async def handle_ghl_new_contact_trigger(request: Request):
                 customer_phone,                                             # customer_phone
                 service_category,                                           # primary_service_category
                 final_specific_service or "",                               # specific_service_requested (properly extracted)
+                zip_code,                                                   # customer_zip_code
                 zip_code,                                                   # service_zip_code
                 service_county,                                             # service_county
                 service_state,                                              # service_state

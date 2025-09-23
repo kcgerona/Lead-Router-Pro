@@ -1,0 +1,31 @@
+[Unit]
+Description=Lead Router Pro FastAPI Application
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/root/Lead-Router-Pro
+Environment="PATH=/root/Lead-Router-Pro/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/Lead-Router-Pro/venv/bin/python -m uvicorn main_working_final:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/Lead-Router-Pro/server.log
+StandardError=append:/root/Lead-Router-Pro/server_error.log
+
+# Restart conditions
+RestartPreventExitStatus=0
+SuccessExitStatus=0
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Kill settings
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
