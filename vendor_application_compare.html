@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vendor Application Comparison - Original vs Unified</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+            background: #f0f2f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        
+        .header p {
+            opacity: 0.95;
+            font-size: 16px;
+        }
+        
+        .controls {
+            background: white;
+            padding: 15px;
+            border-bottom: 1px solid #e1e4e8;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .control-group label {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        button {
+            padding: 8px 16px;
+            background: #0366d6;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #0256c7;
+        }
+        
+        button.secondary {
+            background: #586069;
+        }
+        
+        button.secondary:hover {
+            background: #444d56;
+        }
+        
+        .status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status.ready {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .comparison-container {
+            display: flex;
+            height: calc(100vh - 180px);
+            position: relative;
+        }
+        
+        .version-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            margin: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        .version-header {
+            padding: 15px;
+            border-bottom: 2px solid #e1e4e8;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fafbfc;
+        }
+        
+        .version-title {
+            font-weight: 700;
+            font-size: 18px;
+            color: #24292e;
+        }
+        
+        .version-original .version-header {
+            border-bottom-color: #28a745;
+        }
+        
+        .version-unified .version-header {
+            border-bottom-color: #0366d6;
+        }
+        
+        .iframe-container {
+            flex: 1;
+            position: relative;
+            background: #fff;
+        }
+        
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #586069;
+            z-index: 10;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 15px;
+            font-size: 13px;
+            color: #586069;
+        }
+        
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .stat-value {
+            font-weight: 600;
+            color: #24292e;
+        }
+        
+        .console-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #24292e;
+            color: #fff;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            transition: transform 0.3s;
+            transform: translateY(100%);
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .console-panel.open {
+            transform: translateY(0);
+        }
+        
+        .console-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+            border-bottom: 1px solid #444d56;
+        }
+        
+        .console-entry.error {
+            color: #f97583;
+        }
+        
+        .console-entry.success {
+            color: #85e89d;
+        }
+        
+        .console-entry.info {
+            color: #79b8ff;
+        }
+        
+        @media (max-width: 768px) {
+            .comparison-container {
+                flex-direction: column;
+            }
+            .header h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔬 Vendor Application Widget Comparison</h1>
+        <p>Side-by-side comparison of Original (Hardcoded) vs Unified (API-driven) versions</p>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <button onclick="reloadBoth()">🔄 Reload Both</button>
+            <button onclick="clearCache()" class="secondary">🗑️ Clear Cache</button>
+        </div>
+        <div class="control-group">
+            <label>Console:</label>
+            <button onclick="toggleConsole()" class="secondary">📊 Toggle</button>
+        </div>
+        <div class="control-group">
+            <label>Test:</label>
+            <button onclick="testBoatMaintenance()">🚤 Boat Maintenance</button>
+            <button onclick="checkFinsulate()">🔍 Check Finsulate</button>
+        </div>
+    </div>
+    
+    <div class="comparison-container">
+        <div class="version-panel version-original">
+            <div class="version-header">
+                <span class="version-title">📦 Original (Hardcoded)</span>
+                <div class="stats">
+                    <span class="status loading" id="status-original">Loading...</span>
+                    <span class="stat">Load: <span class="stat-value" id="load-time-original">-</span></span>
+                </div>
+            </div>
+            <div class="iframe-container">
+                <div class="loading-overlay" id="loading-original">
+                    <div>Loading Original Version...</div>
+                </div>
+                <iframe id="iframe-original" src="/vendor-application"></iframe>
+            </div>
+        </div>
+        
+        <div class="version-panel version-unified">
+            <div class="version-header">
+                <span class="version-title">🔄 Unified (API-driven)</span>
+                <div class="stats">
+                    <span class="status loading" id="status-unified">Loading...</span>
+                    <span class="stat">Load: <span class="stat-value" id="load-time-unified">-</span></span>
+                    <span class="stat">API: <span class="stat-value" id="api-time">-</span></span>
+                </div>
+            </div>
+            <div class="iframe-container">
+                <div class="loading-overlay" id="loading-unified">
+                    <div>Loading Unified Version...</div>
+                </div>
+                <iframe id="iframe-unified" src="/vendor-application-unified"></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <div class="console-panel" id="console">
+        <div class="console-entry info">Console initialized - monitoring both versions...</div>
+    </div>
+    
+    <script>
+        let consoleOpen = false;
+        const startTimes = {};
+        
+        function logToConsole(message, type = 'info') {
+            const console = document.getElementById('console');
+            const entry = document.createElement('div');
+            entry.className = `console-entry ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            console.appendChild(entry);
+            console.scrollTop = console.scrollHeight;
+        }
+        
+        function toggleConsole() {
+            const console = document.getElementById('console');
+            consoleOpen = !consoleOpen;
+            console.classList.toggle('open', consoleOpen);
+        }
+        
+        function reloadBoth() {
+            logToConsole('Reloading both versions...', 'info');
+            document.getElementById('iframe-original').src = '/vendor-application';
+            document.getElementById('iframe-unified').src = '/vendor-application-unified';
+            
+            document.getElementById('loading-original').style.display = 'flex';
+            document.getElementById('loading-unified').style.display = 'flex';
+            document.getElementById('status-original').className = 'status loading';
+            document.getElementById('status-original').textContent = 'Loading...';
+            document.getElementById('status-unified').className = 'status loading';
+            document.getElementById('status-unified').textContent = 'Loading...';
+            
+            startTimes.original = Date.now();
+            startTimes.unified = Date.now();
+        }
+        
+        function clearCache() {
+            logToConsole('Clearing localStorage cache...', 'info');
+            localStorage.removeItem('vendor_app_services_cache');
+            logToConsole('Cache cleared - next load will fetch from API', 'success');
+        }
+        
+        async function testBoatMaintenance() {
+            logToConsole('Testing Boat Maintenance category in both versions...', 'info');
+            
+            // Test in both iframes
+            const originalFrame = document.getElementById('iframe-original');
+            const unifiedFrame = document.getElementById('iframe-unified');
+            
+            try {
+                // Check if SERVICE_CATEGORIES exists in both
+                const originalHasData = originalFrame.contentWindow.SERVICE_CATEGORIES && 
+                                       originalFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance'];
+                const unifiedHasData = unifiedFrame.contentWindow.SERVICE_CATEGORIES && 
+                                      unifiedFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance'];
+                
+                if (originalHasData) {
+                    const count = originalFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance'].subcategories.length;
+                    logToConsole(`Original: Boat Maintenance has ${count} subcategories`, 'success');
+                } else {
+                    logToConsole('Original: Boat Maintenance data not found!', 'error');
+                }
+                
+                if (unifiedHasData) {
+                    const count = unifiedFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance'].subcategories.length;
+                    logToConsole(`Unified: Boat Maintenance has ${count} subcategories`, 'success');
+                } else {
+                    logToConsole('Unified: Boat Maintenance data not loaded yet or failed', 'error');
+                }
+            } catch (e) {
+                logToConsole('Error accessing iframe content: ' + e.message, 'error');
+            }
+        }
+        
+        async function checkFinsulate() {
+            logToConsole('Checking for Finsulate service in both versions...', 'info');
+            
+            const originalFrame = document.getElementById('iframe-original');
+            const unifiedFrame = document.getElementById('iframe-unified');
+            
+            try {
+                // Check Original
+                if (originalFrame.contentWindow.SERVICE_CATEGORIES && 
+                    originalFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance']) {
+                    const hasFinsulate = originalFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance']
+                        .subcategories.includes('Finsulate');
+                    logToConsole(`Original: Finsulate ${hasFinsulate ? '✓ FOUND' : '✗ NOT FOUND'}`, 
+                                hasFinsulate ? 'success' : 'error');
+                }
+                
+                // Check Unified
+                if (unifiedFrame.contentWindow.SERVICE_CATEGORIES && 
+                    unifiedFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance']) {
+                    const hasFinsulate = unifiedFrame.contentWindow.SERVICE_CATEGORIES['Boat Maintenance']
+                        .subcategories.includes('Finsulate');
+                    logToConsole(`Unified: Finsulate ${hasFinsulate ? '✓ FOUND' : '✗ NOT FOUND'}`, 
+                                hasFinsulate ? 'success' : 'error');
+                }
+            } catch (e) {
+                logToConsole('Error checking Finsulate: ' + e.message, 'error');
+            }
+        }
+        
+        // Monitor iframe loads
+        document.getElementById('iframe-original').onload = function() {
+            const loadTime = Date.now() - startTimes.original;
+            document.getElementById('loading-original').style.display = 'none';
+            document.getElementById('status-original').className = 'status ready';
+            document.getElementById('status-original').textContent = 'Ready';
+            document.getElementById('load-time-original').textContent = `${loadTime}ms`;
+            logToConsole(`Original version loaded in ${loadTime}ms`, 'success');
+        };
+        
+        document.getElementById('iframe-unified').onload = function() {
+            const loadTime = Date.now() - startTimes.unified;
+            document.getElementById('loading-unified').style.display = 'none';
+            document.getElementById('status-unified').className = 'status ready';
+            document.getElementById('status-unified').textContent = 'Ready';
+            document.getElementById('load-time-unified').textContent = `${loadTime}ms`;
+            logToConsole(`Unified version loaded in ${loadTime}ms`, 'success');
+            
+            // Check if API was called
+            setTimeout(() => {
+                try {
+                    const frame = document.getElementById('iframe-unified');
+                    if (frame.contentWindow.console && frame.contentWindow.console.log.toString().includes('Service data loaded')) {
+                        document.getElementById('api-time').textContent = 'Cached';
+                    } else {
+                        document.getElementById('api-time').textContent = 'Fresh';
+                    }
+                } catch (e) {
+                    document.getElementById('api-time').textContent = 'N/A';
+                }
+            }, 100);
+        };
+        
+        // Initial load
+        startTimes.original = Date.now();
+        startTimes.unified = Date.now();
+        
+        // Auto-open console
+        setTimeout(() => toggleConsole(), 500);
+    </script>
+</body>
+</html>

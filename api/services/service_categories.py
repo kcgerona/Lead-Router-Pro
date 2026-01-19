@@ -15,7 +15,8 @@ SERVICE_CATEGORIES = {
         "Jet Ski Maintenance",
         "Barnacle Cleaning",
         "Fire and Safety Equipment and Services",
-        "Boat Wrapping and Marine Protection Film"
+        "Boat Wrapping and Marine Protection Film",
+        "Finsulate"
     ],
     "Boat and Yacht Repair": [
         "Fiberglass Repair",

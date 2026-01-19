@@ -23,20 +23,21 @@ class LeadRoutingService:
     def __init__(self):
         self.location_service = location_service
     
-    def find_matching_vendors(self, account_id: str, service_category: str, 
+    def find_matching_vendors(self, account_id: str, service_category: str,
                             zip_code: str, priority: str = "normal",
-                            specific_service: str = None) -> List[Dict[str, Any]]:
+                            specific_service: str = None, test_mode: bool = False) -> List[Dict[str, Any]]:
         """
         Find all vendors that can serve the specified location and service category.
         Enhanced with multi-level service matching for precise vendor routing.
-        
+
         Args:
             account_id: Account ID to search within
             service_category: Primary service category (e.g., "Marine Systems")
             zip_code: ZIP code where service is needed
             priority: Priority level of the request
             specific_service: Specific service needed (e.g., "AC Service") - NEW
-            
+            test_mode: If True, allows pending/missing vendors for testing (default: False for live assignments)
+
         Returns:
             List of matching vendors with coverage verification
         """
@@ -60,10 +61,24 @@ class LeadRoutingService:
             
             for vendor in all_vendors:
                 vendor_name = vendor.get('company_name', vendor.get('name', 'Unknown'))
-                
-                # Check if vendor is active and taking new work
-                if vendor.get("status") != "active" or not vendor.get("taking_new_work", False):
-                    logger.debug(f"❌ Skipping vendor {vendor_name} - status={vendor.get('status')}, taking_work={vendor.get('taking_new_work')}")
+
+                # Check vendor status and availability
+                # Test mode: Allow active, pending, and missing_in_ghl vendors for testing
+                # Live mode: Only allow active vendors for real lead assignments
+                if test_mode:
+                    # Test mode: Exclude only inactive/suspended vendors
+                    if vendor.get("status") in ["inactive", "suspended"]:
+                        logger.debug(f"❌ Skipping vendor {vendor_name} - status={vendor.get('status')} (test mode: only excludes inactive/suspended)")
+                        continue
+                else:
+                    # Live mode: Strict filter - only active vendors
+                    if vendor.get("status") != "active":
+                        logger.debug(f"❌ Skipping vendor {vendor_name} - status={vendor.get('status')} (live mode: requires 'active')")
+                        continue
+
+                # Check if taking new work (applies to both modes)
+                if not vendor.get("taking_new_work", False):
+                    logger.debug(f"❌ Skipping vendor {vendor_name} - not taking new work")
                     continue
                 
                 # DIRECT SERVICE MATCHING - match specific service if provided, otherwise category

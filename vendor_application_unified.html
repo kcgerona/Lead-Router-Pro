@@ -1267,831 +1267,102 @@
         }
         window.vendorWidgetInitialized = true;
         
-        // Service Categories Data with Level 3 Services
-        const SERVICE_CATEGORIES = {
-            "Boat and Yacht Repair": {
-                "subcategories": [
-                    "Fiberglass Repair",
-                    "Welding & Metal Fabrication",
-                    "Carpentry & Woodwork",
-                    "Riggers & Masts",
-                    "Jet Ski Repair",
-                    "Boat Canvas and Upholstery",
-                    "Boat Decking and Yacht Flooring"
-                ],
-                "level3Services": {
-                    "Fiberglass Repair": [
-                        "Hull Crack or Structural Repair",
-                        "Gelcoat Repair and Color Matching",
-                        "Transom Repair & Reinforcement",
-                        "Deck Delamination & Soft Spot Repair",
-                        "Stringer & Bulkhead Repair",
-                        "Other"
-                    ],
-                    "Welding & Metal Fabrication": [
-                        "Aluminum or Stainless Steel Hull Repairs",
-                        "Custom Railings",
-                        "Ladders or Boarding Equipment",
-                        "T-Tops, Hardtops or Bimini Frames",
-                        "Fuel or Water Tank Fabrication",
-                        "Exhaust, Engine Bed or Structural Reinforcement",
-                        "Other"
-                    ],
-                    "Carpentry & Woodwork": [
-                        "Interior Woodwork and Cabinetry",
-                        "Teak Deck Repair or Replacement",
-                        "Varnishing & Wood Finishing",
-                        "Structural Wood Repairs",
-                        "Custom Furniture or Fixtures",
-                        "Other"
-                    ],
-                    "Riggers & Masts": [
-                        "Standing Rigging Inspection or Replacement",
-                        "Running Rigging Replacement",
-                        "Mast Stepping & Unstepping",
-                        "Mast Repair or Replacement",
-                        "Rig Tuning & Load Testing",
-                        "Fitting & Hardware Inspection",
-                        "Other"
-                    ],
-                    "Jet Ski Repair": [
-                        "Engine Diagnostics & Repair",
-                        "Jet Pump Rebuild or Replacement",
-                        "Fuel Systems Cleaning or Repair",
-                        "Battery or Electrical Repairs",
-                        "Cooling System Flush or Repair",
-                        "General Maintenance",
-                        "Other"
-                    ],
-                    "Boat Canvas and Upholstery": [
-                        "Upholstery",
-                        "Canvas or Sunshade",
-                        "Trim and Finish",
-                        "Boat Cover or T-Top",
-                        "Acrylic or Strataglass Enclosures",
-                        "Other"
-                    ],
-                    "Boat Decking and Yacht Flooring": [
-                        "SeaDek",
-                        "Real Teak Wood",
-                        "Cork",
-                        "Synthetic Teak",
-                        "Vinyl Flooring",
-                        "Tile Flooring",
-                        "Other"
-                    ]
+        // Service Categories will be loaded dynamically from API
+        let SERVICE_CATEGORIES = {};
+        let SINGLE_SUBCATEGORY_WITH_LEVEL3 = {};
+        
+        // Cache configuration
+        const CACHE_KEY = 'vendor_app_services_cache';
+        const CACHE_TTL = 3600000; // 1 hour in milliseconds
+        
+        // Cache helper functions
+        function getCachedData(key) {
+            try {
+                const cached = localStorage.getItem(key);
+                if (\!cached) return null;
+                
+                const data = JSON.parse(cached);
+                const now = Date.now();
+                
+                if (data.expiry && data.expiry > now) {
+                    console.log('Using cached service data');
+                    return data.value;
                 }
-            },
-            "Boat Maintenance": {
-                "subcategories": [
-                    "Ceramic Coating",
-                    "Boat Detailing",
-                    "Bottom Painting",
-                    "Boat and Yacht Maintenance",
-                    "Boat Oil Change",
-                    "Bilge Cleaning",
-                    "Jet Ski Maintenance",
-                    "Barnacle Cleaning",
-                    "Fire and Safety Equipment and Services",
-                    "Boat Wrapping and Marine Protection Film",
-                    "Finsulate"
-                ],
-                "level3Services": {
-                    "Ceramic Coating": ["Ceramic Coating"],
-                    "Boat Detailing": ["Boat Detailing"],
-                    "Bottom Painting": ["Bottom Painting"],
-                    "Boat and Yacht Maintenance": [
-                        "Ceramic Coating",
-                        "Boat Detailing",
-                        "Bottom Painting",
-                        "Oil Change",
-                        "Bilge Cleaning",
-                        "Jet Ski Maintenance",
-                        "Barnacle Cleaning",
-                        "Fire and Safety Equipment and Services",
-                        "Boat Wrapping or Marine Protection Film",
-                        "Finsulate",
-                        "Other"
-                    ],
-                    "Boat Oil Change": ["Oil Change"],
-                    "Bilge Cleaning": ["Bilge Cleaning"],
-                    "Jet Ski Maintenance": ["Jet Ski Maintenance"],
-                    "Barnacle Cleaning": ["Barnacle Cleaning"],
-                    "Fire and Safety Equipment and Services": ["Fire and Safety Equipment and Services"],
-                    "Boat Wrapping and Marine Protection Film": ["Boat Wrapping or Marine Protection Film"],
-                    "Finsulate": ["Finsulate"]
-                }
-            },
-            "Marine Systems": {
-                "subcategories": [
-                    "Marine Systems Install and Sales",
-                    "Yacht Stabilizers and Seakeepers",
-                    "Instrument Panel and Dashboard",
-                    "Yacht AC Sales",
-                    "Yacht AC Service",
-                    "Boat Electrical Service",
-                    "Boat Sound Systems",
-                    "Yacht Plumbing",
-                    "Boat Lighting",
-                    "Yacht Refrigeration and Watermakers",
-                    "Marine Batteries & Battery Installation",
-                    "Yacht Mechanical Systems"
-                ],
-                "level3Services": {
-                    "Marine Systems Install and Sales": [
-                        "Stabilizers or Seakeepers",
-                        "Instrument Panel and Dashboard",
-                        "AC Sales or Service",
-                        "Electrical Service",
-                        "Sound System",
-                        "Plumbing",
-                        "Lighting",
-                        "Refrigeration or Watermakers",
-                        "Marine Batteries & Batteries Installation",
-                        "Yacht Mechanical Systems"
-                    ],
-                    "Yacht Stabilizers and Seakeepers": [
-                        "New Seakeeper Install",
-                        "Other Stabilizer Install",
-                        "Stabilizer Maintenance",
-                        "Stabilizer Retrofit or Upgrades"
-                    ],
-                    "Instrument Panel and Dashboard": [
-                        "Electronic Dashboard Install or Upgrades",
-                        "Instrument Panel Rewiring & Troubleshooting",
-                        "Custom Dashboard Fabrication & Refacing",
-                        "Gauge Replacement & Calibration",
-                        "Backlighting & Switch Panel Modernization"
-                    ],
-                    "Yacht AC Sales": ["New AC Install or Replacement"],
-                    "Yacht AC Service": [
-                        "New AC Install or Replacement",
-                        "AC Maintenance & Servicing",
-                        "Refrigerant Charging & Leak Repair",
-                        "Pump & Water Flow Troubleshooting",
-                        "Thermostat & Control Panel Upgrades"
-                    ],
-                    "Boat Electrical Service": [
-                        "Battery System Install or Maintenance",
-                        "Wiring & Rewiring",
-                        "Shore Power & Inverter Systems",
-                        "Lighting Systems",
-                        "Electrical Panel & Breaker",
-                        "Navigation & Communication",
-                        "Generator Electrical Integration",
-                        "Solar Power & Battery Charging"
-                    ],
-                    "Boat Sound Systems": [
-                        "Marine Audio System Install",
-                        "Speaker & Subwoofer Upgrades",
-                        "Amplifier Setup & Tuning",
-                        "Multi-Zone Audio Configuration",
-                        "Troubleshooting & System Repairs"
-                    ],
-                    "Yacht Plumbing": [
-                        "Freshwater System Install or Repair",
-                        "Marine Head & Toilet Systems",
-                        "Greywater or Blackwater Tank Maintenance",
-                        "Bilge Pump Install or Drainage",
-                        "Watermaker (Desalinator) Service & Install"
-                    ],
-                    "Boat Lighting": [
-                        "Navigation & Anchor Light Install",
-                        "Underwater Lighting",
-                        "Interior Cabin Lighting",
-                        "Deck, Cockpit & Courtesy Lighting",
-                        "Electrical Troubleshooting & Wiring"
-                    ],
-                    "Yacht Refrigeration and Watermakers": [
-                        "Marine Refrigerator & Freezer Install",
-                        "Refrigeration System Repairs & Troubleshooting",
-                        "Watermaker (Desalinator) Install",
-                        "Watermaker Maintenance & Servicing",
-                        "Cold Plate & Evaporator Upgrades"
-                    ],
-                    "Marine Batteries & Battery Installation": [
-                        "Marine Battery Sales",
-                        "Marine Battery Installation",
-                        "Battery Bank Design & Upgrades",
-                        "Charging System Integration",
-                        "Battery Testing & Maintenance"
-                    ],
-                    "Yacht Mechanical Systems": [
-                        "Propulsion Systems",
-                        "Steering & Rudder Systems",
-                        "Hydraulic Systems",
-                        "Fuel Systems",
-                        "Bilge & Waste Systems"
-                    ]
-                }
-            },
-            "Engines and Generators": {
-                "subcategories": [
-                    "Engines and Generators Sales/Service",
-                    "Generator Sales or Service",
-                    "Generator Sales",
-                    "Generator Service",
-                    "Engine Service or Sales",
-                    "Engine Service",
-                    "Engine Sales",
-                    "Diesel Engine Sales",
-                    "Outboard Engine Sales",
-                    "Inboard Engine Sales",
-                    "Marine Exhaust Systems and Service"
-                ],
-                "level3Services": {
-                    "Engines and Generators Sales/Service": [
-                        "Outboard Engine Service",
-                        "Outboard Engine Sales",
-                        "Inboard Engine Service",
-                        "Inboard Engine Sales",
-                        "Diesel Engine Service",
-                        "Diesel Engine Sales",
-                        "Generator Service",
-                        "Generator Sales",
-                        "Exhaust Systems & Service"
-                    ],
-                    "Generator Sales or Service": [
-                        "Generator Installation",
-                        "Routine Generator Maintenance",
-                        "Electrical System Integration & Transfer Switches",
-                        "Diagnostics & Repairs",
-                        "Sound Shielding & Vibration Control",
-                        "Generator Sales",
-                        "Exhaust Systems & Service"
-                    ],
-                    "Generator Sales": [
-                        "Cummins Onan",
-                        "Kohler",
-                        "Northern Lights",
-                        "Caterpillar",
-                        "Volvo Penta",
-                        "NextGen",
-                        "Phasor",
-                        "Fischer Panda",
-                        "Not Sure/Other"
-                    ],
-                    "Generator Service": [
-                        "Generator Installation",
-                        "Routine Generator Maintenance",
-                        "Electrical System Integration & Transfer Switches",
-                        "Diagnostics & Repairs",
-                        "Sound Shielding & Vibration Control",
-                        "Exhaust Systems & Service"
-                    ],
-                    "Engine Service or Sales": [
-                        "Diesel Engine Sales",
-                        "Inboard Engine Sales",
-                        "Outboard Engine Sales",
-                        "Diesel Engine Maintenance",
-                        "Outboard Engine Maintenance",
-                        "Inboard Engine Maintenance",
-                        "Diesel Engine Repair, Rebuild or Refit",
-                        "Outboard Engine Repair, Rebuild or Refit",
-                        "Inboard Engine Repair, Rebuild or Refit",
-                        "Exhaust Systems & Service"
-                    ],
-                    "Engine Service": [
-                        "Diesel Engine Maintenance",
-                        "Outboard Engine Maintenance",
-                        "Inboard Engine Maintenance",
-                        "Diesel Engine Repair, Rebuild or Refit",
-                        "Outboard Engine Repair, Rebuild or Refit",
-                        "Inboard Engine Repair, Rebuild or Refit",
-                        "Exhaust Systems & Service",
-                        "Sound Shielding & Vibration Control"
-                    ],
-                    "Engine Sales": [
-                        "Diesel Engine Sales",
-                        "Inboard Engine Sales",
-                        "Outboard Engine Sales",
-                        "Electric Engine Sales"
-                    ],
-                    "Diesel Engine Sales": [
-                        "Caterpillar",
-                        "MAN Engines",
-                        "MTU",
-                        "Volvo Penta",
-                        "Cummins Marine",
-                        "Yanmar Marine",
-                        "Perkins Marine",
-                        "John Deer Marine"
-                    ],
-                    "Outboard Engine Sales": [
-                        "Mercury",
-                        "Yamaha",
-                        "Suzuki",
-                        "Honda",
-                        "Seven Marine"
-                    ],
-                    "Inboard Engine Sales": [
-                        "Caterpillar",
-                        "MAN Engines",
-                        "MTU",
-                        "Volvo Penta",
-                        "Cummins Marine",
-                        "Yanmar Marine"
-                    ],
-                    "Marine Exhaust Systems and Service": [
-                        "Marine Exhaust Fabrication",
-                        "Exhaust System Repair & Overhaul",
-                        "Exhaust Insulation & Lagging",
-                        "Exhaust Filtration & Emissions Compliance",
-                        "Exhaust Leak Detection & Corrosion Prevention"
-                    ]
-                }
-            },
-            "Boat Towing": {
-                "subcategories": [
-                    "Get Emergency Tow",
-                    "Get Towing Membership"
-                ],
-                "level3Services": {}
-            },
-            "Boater Resources": {
-                "subcategories": [
-                    "Boater Resources",
-                    "Yacht WiFi",
-                    "Provisioning",
-                    "Boat and Yacht Parts",
-                    "Yacht Photography",
-                    "Yacht Videography",
-                    "Maritime Advertising, PR and Web Design",
-                    "Yacht Crew Placement",
-                    "Yacht Account Management and Bookkeeping",
-                    "Boat Salvage",
-                    "Maritime Attorney"
-                ],
-                "level3Services": {
-                    "Boater Resources": [
-                        "Boat or Yacht Parts",
-                        "Vessel WiFi or Communications",
-                        "Provisioning",
-                        "Boat Salvage",
-                        "Photography or Videography",
-                        "Crew Management",
-                        "Account Management and Bookkeeping",
-                        "Marketing or Web Design",
-                        "Vessel Management",
-                        "Maritime Attorney",
-                        "Other"
-                    ],
-                    "Yacht WiFi": [
-                        "New WiFi",
-                        "WiFi Diagnostics or Troubleshooting",
-                        "Boat Network",
-                        "Satellite",
-                        "Cellular",
-                        "Marina Connections"
-                    ],
-                    "Provisioning": [
-                        "Food & Beverage Provisioning",
-                        "Galley & Kitchen Supplies",
-                        "Crew Provisioning",
-                        "Cabin & Guest Comfort Supplies",
-                        "Medical & First Aid Provisioning",
-                        "Cleaning & Maintenance Supplies",
-                        "Floral & Décor Provisioning",
-                        "Custom Orders & Luxury Concierge Items",
-                        "Fishing, Dive or Watersports Supplies"
-                    ],
-                    "Boat and Yacht Parts": [
-                        "Engine & Propulsion Parts",
-                        "Electrical & Battery Systems Parts",
-                        "Steering & Control Systems Parts",
-                        "Navigation & Electronics Parts",
-                        "Plumbing & Water Systems Parts",
-                        "Hull, Deck & Hardware Parts",
-                        "Safety Equipment and Emergency Gear",
-                        "AC, Refrigeration or Watermaker Parts",
-                        "Canvas, Covers or Upholstery Parts",
-                        "Paint, Maintenance or Cleaning Supplies",
-                        "Trailer or Towing Components",
-                        "Anchoring or Mooring Gear Parts",
-                        "Other"
-                    ],
-                    "Yacht Photography": [
-                        "Listing Photography or Videography (Brokerage & Sales)",
-                        "Lifestyle & Charter Photography or Videography",
-                        "Drone & Aerial Photography or Videography",
-                        "Virtual Tours/3D Walkthroughs",
-                        "Refit or Restoration Progress Documentation",
-                        "Underwater Photography or Videography",
-                        "Event Coverage",
-                        "Social Media Reels/Short-Form Content"
-                    ],
-                    "Yacht Videography": [
-                        "Listing Photography or Videography (Brokerage & Sales)",
-                        "Lifestyle & Charter Photography or Videography",
-                        "Drone & Aerial Photography or Videography",
-                        "Virtual Tours/3D Walkthroughs",
-                        "Refit or Restoration Progress Documentation",
-                        "Underwater Photography or Videography",
-                        "Event Coverage",
-                        "Social Media Reels/Short-Form Content"
-                    ],
-                    "Maritime Advertising, PR and Web Design": [
-                        "Search Engine Optimization (SEO)",
-                        "Web Design",
-                        "PR, Influencer or Affiliate Marketing",
-                        "Podcasts",
-                        "Sponsorships",
-                        "Paid Ads Management",
-                        "Social Media Marketing",
-                        "Email Marketing & Automation",
-                        "Content Marketing and Blogging",
-                        "Video Marketing",
-                        "CRM Integration & Lead Nurturing"
-                    ],
-                    "Yacht Crew Placement": [
-                        "Captain",
-                        "First Mate",
-                        "Engineer",
-                        "Deckhand",
-                        "Chef or Cook",
-                        "Stew",
-                        "Bosun",
-                        "Purser for Provisioning, Accounting or Logistics",
-                        "Nanny, Masseuse or Personal Trainer",
-                        "Security Officer or Bodyguard"
-                    ],
-                    "Yacht Account Management and Bookkeeping": [
-                        "Operational Expense Tracking",
-                        "Crew Payroll & Expense Reconciliation",
-                        "Budget Planning & Forecasting",
-                        "Charter Income & Expense Reporting",
-                        "Vendor & Invoice Management",
-                        "Tax Compliance & VAT Management",
-                        "Insurance Premium & Policy Accounting",
-                        "Financial Reporting & Owner Statements"
-                    ],
-                    "Boat Salvage": [
-                        "Emergency Water Removal",
-                        "Emergency Boat Recovery",
-                        "Sell Boat for Parts",
-                        "Mold/Water Remediation"
-                    ],
-                    "Maritime Attorney": [
-                        "Maritime Personal Injury Case",
-                        "Marine Insurance Dispute",
-                        "Maritime Commercial and Contract Case",
-                        "Environmental & Regulatory Compliance",
-                        "Vessel Documentation and Transactions",
-                        "Maritime Criminal Defense",
-                        "Other"
-                    ]
-                }
-            },
-            "Buying or Selling a Boat": {
-                "subcategories": [
-                    "Buying or Selling a Boat or Yacht",
-                    "Boat Insurance",
-                    "Yacht Insurance",
-                    "Yacht Builder",
-                    "Yacht Broker",
-                    "Boat Broker",
-                    "Boat Builder",
-                    "Boat Financing",
-                    "Boat Surveyors",
-                    "Yacht Dealers",
-                    "Boat Dealers"
-                ],
-                "level3Services": {
-                    "Buying or Selling a Boat or Yacht": ["Buy", "Sell", "Trade"],
-                    "Boat Insurance": [
-                        "I Just Bought the Vessel",
-                        "New Vessel Policy",
-                        "Looking For Quotes Before Purchasing Vessel"
-                    ],
-                    "Yacht Insurance": [
-                        "I Just Bought the Vessel",
-                        "New Vessel Policy",
-                        "Looking For Quotes Before Purchasing Vessel"
-                    ],
-                    "Yacht Builder": [],
-                    "Yacht Broker": [
-                        "Buy a New Yacht",
-                        "Buy a Pre-Owned Yacht",
-                        "Sell a Pre-Owned Yacht",
-                        "Trade My Yacht",
-                        "Looking to Charter My Yacht",
-                        "Looking for Yacht Management"
-                    ],
-                    "Boat Broker": [
-                        "Buy a New Yacht",
-                        "Buy a Pre-Owned Yacht",
-                        "Sell a Pre-Owned Yacht",
-                        "Trade My Yacht",
-                        "Looking to Charter My Yacht",
-                        "Looking for Yacht Management"
-                    ],
-                    "Boat Builder": [],
-                    "Boat Financing": [
-                        "New Boat Financing",
-                        "Used Boat Financing",
-                        "Refinancing"
-                    ],
-                    "Boat Surveyors": [
-                        "Hull & Engine(s)",
-                        "Thermal Imaging",
-                        "Insurance/Damage",
-                        "Hull Only",
-                        "Engine(s) Only"
-                    ],
-                    "Yacht Dealers": [
-                        "Buy a New Yacht",
-                        "Buy a Pre-Owned Yacht",
-                        "Sell a Pre-Owned Yacht",
-                        "Trade My Yacht",
-                        "Looking to Charter My Yacht",
-                        "Looking for Yacht Management"
-                    ],
-                    "Boat Dealers": [
-                        "Buy a New Boat",
-                        "Buy a Pre-Owned Boat",
-                        "Sell a Pre-Owned Boat",
-                        "Trade My Boat",
-                        "Looking to Charter My Boat",
-                        "Looking for Boat Management"
-                    ]
-                }
-            },
-            "Docks, Seawalls and Lifts": {
-                "subcategories": [
-                    "Dock, Boat Lift or Seawall Builders or Repair",
-                    "Boat Lift Installers",
-                    "Floating Dock Sales",
-                    "Seawall Construction",
-                    "Dock, Seawall or Piling Cleaning"
-                ],
-                "level3Services": {
-                    "Dock, Boat Lift or Seawall Builders or Repair": [
-                        "Seawall Construction or Repair",
-                        "New Dock",
-                        "Dock Repair",
-                        "Pilings or Structural Support",
-                        "Floating Docks",
-                        "Boat Lift",
-                        "Seawall or Piling Cleaning"
-                    ],
-                    "Boat Lift Installers": [
-                        "New Boat Lift",
-                        "Boat Lift Installation",
-                        "Lift Motor & Gearbox Repair",
-                        "Cable & Pulley Replacement",
-                        "Annual Maintenance & Alignment"
-                    ],
-                    "Floating Dock Sales": [
-                        "New Floating Dock",
-                        "Floating Dock Installation",
-                        "Floating Dock Repair & Float Replacement",
-                        "Custom Modifications & Add-Ons",
-                        "Seasonal Maintenance & Dock Repositioning"
-                    ],
-                    "Seawall Construction": [
-                        "New Seawall Construction",
-                        "Seawall Repair & Reinforcement",
-                        "Cap Replacement & Restoration",
-                        "Erosion Control & Backfill Replacement",
-                        "Seawall Maintenance or Inspection"
-                    ],
-                    "Dock, Seawall or Piling Cleaning": [
-                        "Dock Cleaning",
-                        "Seawall Cleaning",
-                        "Piling Cleaning",
-                        "Commercial or Industrial Requests"
-                    ]
-                }
-            },
-            "Dock and Slip Rental": {
-                "subcategories": [
-                    "Dock and Slip Rental",
-                    "Rent My Dock"
-                ],
-                "level3Services": {
-                    "Dock and Slip Rental": [
-                        "Private Dock",
-                        "Boat Slip",
-                        "Marina",
-                        "Mooring Ball"
-                    ],
-                    "Rent My Dock": [
-                        "Private Dock",
-                        "Boat Slip",
-                        "Marina",
-                        "Mooring Ball"
-                    ]
-                }
-            },
-            "Fuel Delivery": {
-                "subcategories": [
-                    "Fuel Delivery"
-                ],
-                "level3Services": {
-                    "Fuel Delivery": [
-                        "Dyed Diesel Fuel (For Boats)",
-                        "Regular Diesel Fuel (Landside Business)",
-                        "Rec 90 (Ethanol Free Gas)"
-                    ]
-                }
-            },
-            "Boat Charters and Rentals": {
-                "subcategories": [
-                    "Boat Charters and Rentals",
-                    "Boat Clubs",
-                    "Fishing Charters",
-                    "Yacht and Catamaran Charters",
-                    "Sailboat Charters",
-                    "eFoil, Kiteboarding & Wing Surfing",
-                    "Dive Equipment and Services",
-                    "Jet Ski Rental",
-                    "Kayak Rental",
-                    "Paddleboard Rental",
-                    "Pontoon Boat Charter or Rental",
-                    "Party Boat Charter",
-                    "Private Yacht Charter"
-                ],
-                "level3Services": {
-                    "Boat Charters and Rentals": [
-                        "Weekly or Monthly Yacht or Catamaran Charter",
-                        "Daily Yacht or Catamaran Charter",
-                        "Sailboat Charter",
-                        "Fishing Charter",
-                        "Party Boat Charter",
-                        "Pontoon Boat Charter or Rental",
-                        "Jet Ski Rental",
-                        "Paddleboard Rental",
-                        "Kayak Rental",
-                        "eFoil, Kiteboarding or Wing Surfing Lessons",
-                        "Boat Club",
-                        "Boat Rental"
-                    ],
-                    "Boat Clubs": [
-                        "Membership Boat Club",
-                        "Yacht Club",
-                        "Private Fractional Ownership Club",
-                        "Sailing Club",
-                        "Luxury Boat Membership Club"
-                    ],
-                    "Fishing Charters": [
-                        "Inshore Fishing Charter",
-                        "Offshore (Deep Sea) Fishing Charter",
-                        "Reef & Wreck Fishing Charter",
-                        "Drift Boat Charter",
-                        "Freshwater Fishing Charter",
-                        "Private Party Boat Charter",
-                        "Fishing Resort Vacation"
-                    ],
-                    "Yacht and Catamaran Charters": [
-                        "Day Yacht Charter",
-                        "Day Catamaran Charter",
-                        "Group Yacht or Catamaran Charter",
-                        "Weekly or Monthly Catamaran or Yacht Charter",
-                        "Other"
-                    ],
-                    "Sailboat Charters": [
-                        "Bareboat Charter (No Captain or Crew)",
-                        "Skippered Charter",
-                        "Crewed Charter",
-                        "Cabin Charter",
-                        "Sailing Charter (Learn to Sail)",
-                        "Weekly or Monthly Charter"
-                    ],
-                    "eFoil, Kiteboarding & Wing Surfing": [
-                        "eFoil Lessons",
-                        "eFoil Equipment",
-                        "Kiteboarding Lessons",
-                        "Kiteboarding Equipment",
-                        "Wing Surfing Lessons",
-                        "Wing Surfing Equipment"
-                    ],
-                    "Dive Equipment and Services": [
-                        "Private Scuba Diving Charter",
-                        "Shared Scuba Diving Charter",
-                        "Scuba Equipment Rental",
-                        "Snorkel and Free Diving Charter",
-                        "Night Diving",
-                        "Underwater Scooter Rental"
-                    ],
-                    "Jet Ski Rental": [
-                        "Hourly Jet Ski Rental",
-                        "Multiple Day Jet Ski Rental",
-                        "Jet Ski Tour"
-                    ],
-                    "Kayak Rental": [
-                        "Hourly Kayak Rental",
-                        "Multiple Day Kayak Rental",
-                        "Kayak Tour"
-                    ],
-                    "Paddleboard Rental": [
-                        "Hourly Paddleboard Rental",
-                        "Multiple Day Paddleboard Rental",
-                        "Paddleboard Tour"
-                    ],
-                    "Pontoon Boat Charter or Rental": [
-                        "Hourly Pontoon Rental",
-                        "Multiple Day Pontoon Rental",
-                        "Pontoon Charter"
-                    ],
-                    "Party Boat Charter": [
-                        "Pontoon Party Boat",
-                        "Catamaran Party Boat",
-                        "Yacht Party Boat",
-                        "50+ Person Party Boat"
-                    ],
-                    "Private Yacht Charter": [
-                        "Private Motoryacht Charter",
-                        "Private Sailing Catamaran Charter",
-                        "Private Fishing Yacht Charter",
-                        "Superyacht Private Charter"
-                    ]
-                }
-            },
-            "Boat Hauling and Yacht Delivery": {
-                "subcategories": [
-                    "Yacht Delivery",
-                    "Boat Hauling and Transport"
-                ],
-                "level3Services": {}
-            },
-            "Maritime Education and Training": {
-                "subcategories": [
-                    "Maritime Education and Training"
-                ],
-                "level3Services": {
-                    "Maritime Education and Training": [
-                        "Yacht, Sailboat or Catamaran On Water Training",
-                        "Interested In Buying a Boat or Insurance Sign Off",
-                        "Maritime Academy",
-                        "Sailing Schools",
-                        "Captains License"
-                    ]
-                }
-            },
-            "Yacht Management": {
-                "subcategories": [
-                    "Yacht Management"
-                ],
-                "level3Services": {
-                    "Yacht Management": [
-                        "Full Service Vessel Management",
-                        "Technical Management (Maintenance, Repairs, Upgrades, etc)",
-                        "Crew Management",
-                        "Accounting & Financial Management",
-                        "Insurance & Risk Management",
-                        "Regulatory Compliance",
-                        "Maintenance & Refit Management",
-                        "Logistical Support (Transportation, Provisioning, Fuel or Dockage)",
-                        "Wash Downs and Systems Checks"
-                    ]
-                }
-            },
-            "Waterfront Property": {
-                "subcategories": [
-                    "Waterfront Homes For Sale",
-                    "Sell Your Waterfront Home",
-                    "Waterfront New Developments"
-                ],
-                "level3Services": {
-                    "Waterfront Homes For Sale": [
-                        "Buy a Waterfront Home or Condo",
-                        "Sell a Waterfront Home or Condo",
-                        "Buy a Waterfront New Development",
-                        "Rent a Waterfront Property"
-                    ],
-                    "Sell Your Waterfront Home": [
-                        "Buy a Waterfront Home or Condo",
-                        "Sell a Waterfront Home or Condo",
-                        "Buy a Waterfront New Development",
-                        "Rent a Waterfront Property"
-                    ],
-                    "Waterfront New Developments": [
-                        "Buy a Waterfront Home or Condo",
-                        "Sell a Waterfront Home or Condo",
-                        "Buy a Waterfront New Development",
-                        "Rent a Waterfront Property"
-                    ]
-                }
-            },
-            "Wholesale or Dealer Product Pricing": {
-                "subcategories": [
-                    "Wholesale or Dealer Product Pricing"
-                ],
-                "level3Services": {
-                    "Wholesale or Dealer Product Pricing": [
-                        "Apparel",
-                        "Boat Accessories",
-                        "Boat Maintenance & Cleaning Products",
-                        "Boat Safety Products",
-                        "Diving Equipment",
-                        "Dock Accessories",
-                        "Fishing Gear",
-                        "Personal Watercraft",
-                        "Other"
-                    ]
-                }
+                
+                // Cache expired
+                localStorage.removeItem(key);
+                return null;
+            } catch (e) {
+                console.error('Cache read error:', e);
+                return null;
             }
-        };
+        }
+        
+        function setCachedData(key, value) {
+            try {
+                const data = {
+                    value: value,
+                    expiry: Date.now() + CACHE_TTL
+                };
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch (e) {
+                console.error('Cache write error:', e);
+            }
+        }
+        
+        // Load service data from API or cache
+        async function loadServiceData() {
+            // Check cache first
+            const cached = getCachedData(CACHE_KEY);
+            if (cached) {
+                SERVICE_CATEGORIES = cached.services;
+                SINGLE_SUBCATEGORY_WITH_LEVEL3 = cached.singleSubcategoryMapping || {};
+                return true;
+            }
+            
+            // Fetch from API
+            try {
+                console.log('Fetching service data from API...');
+                const response = await fetch('/api/v1/unified-services/vendor-application');
+                
+                if (\!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.services) {
+                    SERVICE_CATEGORIES = data.services;
+                    SINGLE_SUBCATEGORY_WITH_LEVEL3 = data.singleSubcategoryMapping || {};
+                    
+                    // Cache the data
+                    setCachedData(CACHE_KEY, {
+                        services: SERVICE_CATEGORIES,
+                        singleSubcategoryMapping: SINGLE_SUBCATEGORY_WITH_LEVEL3
+                    });
+                    
+                    console.log('Service data loaded successfully');
+                    return true;
+                } else {
+                    throw new Error('Invalid API response format');
+                }
+            } catch (error) {
+                console.error('Failed to load service data:', error);
+                
+                // Fallback to basic categories if API fails
+                // This ensures the form still works even if API is down
+                SERVICE_CATEGORIES = {
+                    "Error Loading Services": {
+                        "subcategories": ["Please refresh the page"],
+                        "level3Services": {}
+                    }
+                };
+                return false;
+            }
+        }
+        
+        // Initialize service data on load
+        let serviceDataPromise = loadServiceData();
 
         // Widget State
         const widgetState = {
@@ -2712,13 +1983,8 @@
             'Wholesale or Dealer Product Pricing'
         ];
 
-        // Categories with single subcategory that have Level 3 services
-        const SINGLE_SUBCATEGORY_WITH_LEVEL3 = {
-            'Fuel Delivery': 'Fuel Delivery',
-            'Maritime Education and Training': 'Maritime Education and Training',
-            'Yacht Management': 'Yacht Management',
-            'Wholesale or Dealer Product Pricing': 'Wholesale or Dealer Product Pricing'
-        };
+        // SINGLE_SUBCATEGORY_WITH_LEVEL3 is now loaded from API
+        // It's set in loadServiceData() function above
 
         // Filter out redundant subcategories
         function filterRedundantSubcategories(services, category) {
@@ -4065,6 +3331,38 @@
                 attributes: true,
                 attributeFilter: ['style', 'class']
             });
+        }
+    })();
+    
+    // Initialize the widget after service data loads
+    (async function() {
+        try {
+            // Show loading indicator
+            const widget = document.getElementById('vendor-survey-widget');
+            if (widget) {
+                const loadingDiv = document.createElement('div');
+                loadingDiv.id = 'service-loading';
+                loadingDiv.innerHTML = '<div style="padding: 20px; text-align: center;">Loading services...</div>';
+                widget.insertBefore(loadingDiv, widget.firstChild);
+            }
+            
+            // Wait for service data to load
+            await serviceDataPromise;
+            
+            // Remove loading indicator
+            const loadingDiv = document.getElementById('service-loading');
+            if (loadingDiv) {
+                loadingDiv.remove();
+            }
+            
+            // Initialize the widget
+            initializeWidget();
+            
+            console.log('Vendor application widget initialized with unified services');
+        } catch (error) {
+            console.error('Failed to initialize vendor widget:', error);
+            // Still try to initialize even if service loading failed
+            initializeWidget();
         }
     })();
     </script>

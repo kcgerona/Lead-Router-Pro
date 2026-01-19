@@ -126,6 +126,10 @@ app.include_router(vendor_matching_router, prefix="/api/v1/vendor-matching", tag
 app.include_router(service_dictionary_router)
 app.include_router(services_api_router)
 
+# Include unified services router
+from api.routes.unified_services_routes import router as unified_services_router
+app.include_router(unified_services_router)
+
 # Create static and templates directories if they don't exist relative to BASE_DIR
 static_dir = BASE_DIR / "static"
 static_dir.mkdir(exist_ok=True)
@@ -395,6 +399,18 @@ async def vendor_application_working():
     """Serve the WORKING vendor application with all fixes"""
     vendor_app_working_path = BASE_DIR / "vendor_application_working.html"
     return HTMLResponse(content=read_html_file(vendor_app_working_path))
+
+@app.get("/vendor-application-unified", response_class=HTMLResponse)
+async def vendor_application_unified():
+    """Serve the UNIFIED vendor application that uses the unified services API"""
+    vendor_app_unified_path = BASE_DIR / "vendor_application_unified.html"
+    return HTMLResponse(content=read_html_file(vendor_app_unified_path))
+
+@app.get("/vendor-application-compare", response_class=HTMLResponse)
+async def vendor_application_compare():
+    """Serve the comparison page for testing original vs unified vendor applications"""
+    vendor_app_compare_path = BASE_DIR / "vendor_application_compare.html"
+    return HTMLResponse(content=read_html_file(vendor_app_compare_path))
 
 # Health check endpoint
 @app.get("/health")

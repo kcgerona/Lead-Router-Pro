@@ -19,6 +19,7 @@ from database.simple_connection import db as simple_db_instance
 from api.services.ghl_api import GoHighLevelAPI
 from api.services.ghl_api_v2_optimized import OptimizedGoHighLevelAPI
 # REMOVED: from api.services.field_mapper import field_mapper  # OLD - can't handle GHL nested customFields
+from api.services.ghl_field_mapper import field_mapper  # NEW: Replacement with proper GHL support
 from api.services.lead_routing_service import lead_routing_service
 from api.services.location_service import location_service
 from api.services.service_mapper import (
@@ -2930,16 +2931,36 @@ async def clean_webhook_health_check():
         db_stats = {"error": str(e)}
         db_healthy = False
     
-    # Test field reference loading via field_mapper
-    field_mapper_stats = field_mapper.get_mapping_stats()
-    field_reference_healthy = field_mapper_stats.get("ghl_fields_loaded", 0) > 0
+    # Test field reference loading directly from field_reference.json
+    try:
+        import json
+        from pathlib import Path
+        field_ref_path = Path("/root/Lead-Router-Pro/field_reference.json")
+        if field_ref_path.exists():
+            with open(field_ref_path, 'r') as f:
+                field_reference = json.load(f)
+                # field_reference.json has direct field IDs as keys, not a customFields array
+                field_count = len(field_reference)
+        else:
+            field_reference = {}
+            field_count = 0
+    except Exception as e:
+        logger.error(f"Error loading field reference: {e}")
+        field_reference = {}
+        field_count = 0
+    
+    field_mapper_stats = {
+        "ghl_fields_loaded": field_count,
+        "custom_fields_available": field_count
+    }
+    field_reference_healthy = field_count > 0
     
     return {
         "status": "healthy" if (db_healthy and field_reference_healthy) else "degraded",
         "webhook_system": "clean_direct_processing_no_ai",
         "ghl_location_id": AppConfig.GHL_LOCATION_ID,
         "pipeline_configured": AppConfig.PIPELINE_ID is not None and AppConfig.NEW_LEAD_STAGE_ID is not None,
-        "valid_field_count": len(field_mapper.get_all_ghl_field_keys()),
+        "valid_field_count": field_mapper_stats.get("ghl_fields_loaded", 0),
         "custom_field_mappings": field_mapper_stats.get("ghl_fields_loaded", 0),
         "service_categories": len(DOCKSIDE_PROS_SERVICES),
         "database_status": "healthy" if db_healthy else "error",
@@ -2980,15 +3001,30 @@ async def get_clean_service_categories():
 async def get_clean_field_mappings():
     """Return all available field mappings for form development - Direct only"""
     
-    # Get all valid GHL field keys
-    all_ghl_fields = field_mapper.get_all_ghl_field_keys()
+    # Load field reference directly from field_reference.json
+    try:
+        import json
+        from pathlib import Path
+        field_ref_path = Path("/root/Lead-Router-Pro/field_reference.json")
+        if field_ref_path.exists():
+            with open(field_ref_path, 'r') as f:
+                field_reference = json.load(f)
+        else:
+            field_reference = {}
+    except Exception as e:
+        logger.error(f"Error loading field reference for mappings: {e}")
+        field_reference = {}
     
-    # Build custom field mappings with details
+    # Build custom field mappings from field_reference.json
+    # The file has field IDs as keys directly
     custom_field_mappings = {}
-    for field_key in all_ghl_fields:
-        field_details = field_mapper.get_ghl_field_details(field_key)
-        if field_details:
-            custom_field_mappings[field_key] = field_details
+    for field_id, field_info in field_reference.items():
+        if isinstance(field_info, dict):
+            custom_field_mappings[field_id] = {
+                'name': field_info.get('name', field_id),
+                'id': field_id,
+                'type': field_info.get('fieldType', 'TEXT')
+            }
     
     return {
         "status": "success",
@@ -2999,8 +3035,11 @@ async def get_clean_field_mappings():
         ],
         "custom_field_mappings": custom_field_mappings,
         "total_custom_fields": len(custom_field_mappings),
-        "field_reference_source": "field_reference.json via field_mapper service",
-        "mapping_stats": field_mapper.get_mapping_stats(),
+        "field_reference_source": "ServiceDictionaryMapper with field_reference.json",
+        "mapping_stats": {
+            "ghl_fields_loaded": len(custom_field_mappings),
+            "custom_fields_available": len(custom_field_mappings)
+        },
         "processing_method": "direct_field_mapping_no_ai",
         "ai_processing": "disabled",
         "message": "Complete field mappings for GHL integration - Direct processing only"

@@ -107,11 +107,13 @@ async def test_vendor_matching_enhanced(request: EnhancedVendorMatchingRequest):
         
         # Use the existing lead routing service to find matching vendors
         # This uses the same logic as the actual lead routing system
+        # Use test_mode=True to include pending/missing_in_ghl vendors for testing
         matching_vendors_raw = lead_routing_service.find_matching_vendors(
             account_id=account_id,
             service_category=service_category,
             zip_code=zip_code,
-            specific_service=service_to_match  # Pass the most specific service for exact matching
+            specific_service=service_to_match,  # Pass the most specific service for exact matching
+            test_mode=True  # Allow pending/missing vendors for testing (live assignments still require 'active')
         )
         
         # Format vendors for display

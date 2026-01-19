@@ -5,8 +5,9 @@ import json
 import uuid
 import sys
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 from datetime import datetime
 
 # Import the proven components used by vendor widget
@@ -19,6 +20,14 @@ from config import AppConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Functions"])
+
+# Pydantic models for request bodies
+class BulkDeleteRequest(BaseModel):
+    ids: List[str]
+    
+class VendorFilterRequest(BaseModel):
+    status: Optional[str] = None
+    include_inactive: bool = False
 
 @router.post("/sync-single-vendor/{contact_id}")
 async def sync_single_vendor(contact_id: str):
@@ -742,3 +751,279 @@ async def admin_health_check():
         "service": "admin_functions",
         "timestamp": datetime.now().isoformat()
     }
+
+# ============================================
+# Vendor and Lead Deletion Endpoints
+# ============================================
+
+@router.get("/vendors/filtered")
+async def get_filtered_vendors(
+    status: Optional[str] = None,
+    include_inactive: bool = False
+):
+    """
+    Get vendors with optional filtering
+    - Filter by status (active, inactive, missing_in_ghl, inactive_ghl_deleted)
+    - Include/exclude inactive vendors
+    """
+    try:
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT id, name, email, company_name, status, ghl_contact_id,
+                   taking_new_work, lead_close_percentage, created_at
+            FROM vendors
+            WHERE 1=1
+        """
+        params = []
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        
+        if not include_inactive:
+            query += " AND status NOT IN ('inactive', 'missing_in_ghl', 'inactive_ghl_deleted')"
+        
+        query += " ORDER BY created_at DESC"
+        
+        cursor.execute(query, params)
+        vendors = []
+        
+        for row in cursor.fetchall():
+            vendors.append({
+                'id': row[0],
+                'name': row[1],
+                'email': row[2],
+                'company_name': row[3],
+                'status': row[4],
+                'ghl_contact_id': row[5],
+                'taking_new_work': row[6],
+                'lead_close_percentage': row[7],
+                'created_at': row[8]
+            })
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "count": len(vendors),
+            "vendors": vendors
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching filtered vendors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/vendors/{vendor_id}")
+async def delete_vendor(vendor_id: str):
+    """
+    Permanently delete a single vendor from the database
+    """
+    try:
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        # Check if vendor exists
+        cursor.execute("SELECT name FROM vendors WHERE id = ?", (vendor_id,))
+        vendor = cursor.fetchone()
+        
+        if not vendor:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Vendor not found")
+        
+        vendor_name = vendor[0]
+        
+        # Delete the vendor
+        cursor.execute("DELETE FROM vendors WHERE id = ?", (vendor_id,))
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Permanently deleted vendor: {vendor_name} (ID: {vendor_id})")
+        
+        return {
+            "status": "success",
+            "message": f"Vendor {vendor_name} deleted successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting vendor: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/vendors/bulk-delete")
+async def bulk_delete_vendors(request: BulkDeleteRequest):
+    """
+    Permanently delete multiple vendors from the database
+    """
+    try:
+        if not request.ids:
+            raise HTTPException(status_code=400, detail="No vendor IDs provided")
+        
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        deleted_count = 0
+        deleted_names = []
+        
+        for vendor_id in request.ids:
+            cursor.execute("SELECT name FROM vendors WHERE id = ?", (vendor_id,))
+            vendor = cursor.fetchone()
+            
+            if vendor:
+                vendor_name = vendor[0]
+                cursor.execute("DELETE FROM vendors WHERE id = ?", (vendor_id,))
+                deleted_count += 1
+                deleted_names.append(vendor_name)
+                logger.info(f"✅ Deleted vendor: {vendor_name}")
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "deleted_vendors": deleted_names,
+            "message": f"Successfully deleted {deleted_count} vendor(s)"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error bulk deleting vendors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/leads/filtered")
+async def get_filtered_leads(
+    status: Optional[str] = None,
+    include_inactive: bool = False
+):
+    """
+    Get leads with optional filtering
+    - Filter by status (new, assigned, completed, inactive_ghl_deleted)
+    - Include/exclude inactive leads
+    """
+    try:
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT l.id, l.customer_name, l.customer_email, l.customer_phone,
+                   l.primary_service_category, l.specific_service_requested,
+                   l.status, l.ghl_contact_id, l.created_at,
+                   v.name as vendor_name
+            FROM leads l
+            LEFT JOIN vendors v ON l.vendor_id = v.id
+            WHERE 1=1
+        """
+        params = []
+        
+        if status:
+            query += " AND l.status = ?"
+            params.append(status)
+        
+        if not include_inactive:
+            query += " AND l.status != 'inactive_ghl_deleted'"
+        
+        query += " ORDER BY l.created_at DESC"
+        
+        cursor.execute(query, params)
+        leads = []
+        
+        for row in cursor.fetchall():
+            leads.append({
+                'id': row[0],
+                'customer_name': row[1],
+                'customer_email': row[2],
+                'customer_phone': row[3],
+                'primary_service_category': row[4],
+                'specific_service_requested': row[5],
+                'status': row[6],
+                'ghl_contact_id': row[7],
+                'created_at': row[8],
+                'vendor_name': row[9]
+            })
+        
+        conn.close()
+        
+        return {
+            "status": "success",
+            "count": len(leads),
+            "leads": leads
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching filtered leads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/leads/{lead_id}")
+async def delete_lead(lead_id: str):
+    """
+    Permanently delete a single lead from the database
+    """
+    try:
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        # Check if lead exists
+        cursor.execute("SELECT customer_name FROM leads WHERE id = ?", (lead_id,))
+        lead = cursor.fetchone()
+        
+        if not lead:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        customer_name = lead[0]
+        
+        # Delete the lead
+        cursor.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Permanently deleted lead: {customer_name} (ID: {lead_id})")
+        
+        return {
+            "status": "success",
+            "message": f"Lead {customer_name} deleted successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error deleting lead: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/leads/bulk-delete")
+async def bulk_delete_leads(request: BulkDeleteRequest):
+    """
+    Permanently delete multiple leads from the database
+    """
+    try:
+        if not request.ids:
+            raise HTTPException(status_code=400, detail="No lead IDs provided")
+        
+        conn = simple_db_instance._get_conn()
+        cursor = conn.cursor()
+        
+        deleted_count = 0
+        deleted_names = []
+        
+        for lead_id in request.ids:
+            cursor.execute("SELECT customer_name FROM leads WHERE id = ?", (lead_id,))
+            lead = cursor.fetchone()
+            
+            if lead:
+                customer_name = lead[0]
+                cursor.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+                deleted_count += 1
+                deleted_names.append(customer_name)
+                logger.info(f"✅ Deleted lead: {customer_name}")
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "deleted_leads": deleted_names,
+            "message": f"Successfully deleted {deleted_count} lead(s)"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error bulk deleting leads: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

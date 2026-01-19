@@ -273,6 +273,7 @@ DOCKSIDE_PROS_SERVICES = {
                     "Barnacle Cleaning",
                     "Fire and Safety Equipment and Services",
                     "Boat Wrapping or Marine Protection Film",
+                    "Finsulate",
                     "Other"
                 ]
             },
@@ -299,6 +300,10 @@ DOCKSIDE_PROS_SERVICES = {
             "Boat Wrapping and Marine Protection Film": {
                 "request_a_pro": True,
                 "specific_services": ["Boat Wrapping or Marine Protection Film"]
+            },
+            "Finsulate": {
+                "request_a_pro": True,
+                "specific_services": ["Finsulate"]
             }
         }
     },

@@ -174,30 +174,44 @@ class EnhancedDatabaseSync:
     
     def _fetch_all_ghl_vendors(self) -> Dict[str, Dict]:
         """
-        Fetch ALL vendor contacts from GHL
+        Fetch vendor contacts from GHL by matching with local vendor database
         Returns dict keyed by contact ID for fast lookup
         """
         all_vendors = {}
         
         try:
-            # We need to implement pagination to get ALL contacts
-            # Most GHL APIs limit to 100 per request
+            # First, get all local vendor GHL contact IDs and emails
+            conn = simple_db_instance._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ghl_contact_id, email, name 
+                FROM vendors 
+                WHERE ghl_contact_id IS NOT NULL OR email IS NOT NULL
+            """)
+            
+            local_vendor_identifiers = {}
+            for row in cursor.fetchall():
+                if row[0]:  # Has GHL contact ID
+                    local_vendor_identifiers[row[0]] = {'type': 'contact_id', 'name': row[2]}
+                if row[1]:  # Has email
+                    local_vendor_identifiers[row[1].lower()] = {'type': 'email', 'name': row[2]}
+            
+            conn.close()
+            
+            logger.info(f"   Found {len(local_vendor_identifiers)} vendor identifiers to match")
+            
+            # Now fetch contacts from GHL and match against our vendor identifiers
             limit = 100
             offset = 0
-            total_fetched = 0
+            matched_count = 0
             
             while True:
                 logger.info(f"   Fetching GHL contacts (offset: {offset}, limit: {limit})")
                 
-                # Build query to get vendor contacts
-                # We'll need to filter by tag or custom field that identifies vendors
                 params = {
                     'locationId': self.ghl_api.location_id,
                     'limit': limit,
                     'skip': offset,
-                    # Add filter for vendors - this depends on how vendors are tagged
-                    # 'tags': 'vendor',  # Example if using tags
-                    # Or use custom field filter if vendors have specific field values
                 }
                 
                 # Make API call
@@ -224,28 +238,27 @@ class EnhancedDatabaseSync:
                 # Process each contact
                 for contact in contacts:
                     contact_id = contact.get('id')
+                    contact_email = contact.get('email', '').lower()
                     
-                    # Check if this is a vendor using multiple criteria
-                    custom_fields = {cf['id']: cf.get('value', '') 
-                                   for cf in contact.get('customFields', [])}
+                    # Check if this contact matches a vendor by ID or email
+                    is_vendor = False
+                    vendor_match = None
                     
-                    # Check multiple vendor indicators:
-                    # 1. Has GHL User ID field (most reliable if present)
-                    ghl_user_id = custom_fields.get('HXVNT4y8OynNokWAfO2D', '')
+                    # Priority 1: Match by GHL contact ID
+                    if contact_id in local_vendor_identifiers:
+                        is_vendor = True
+                        vendor_match = local_vendor_identifiers[contact_id]
+                        logger.debug(f"   Matched vendor by contact ID: {vendor_match['name']}")
                     
-                    # 2. Has vendor-specific tags
-                    tags = [tag.lower() for tag in contact.get('tags', [])]
-                    has_vendor_tag = any('vendor' in tag or 'service provider' in tag for tag in tags)
-                    
-                    # 3. Has service categories field populated (vendors offer services)
-                    service_categories = custom_fields.get('O84LyhN1QjZ8Zz5mteCM', '')  # Service Categories field
-                    
-                    # Consider as vendor if ANY of these conditions are met
-                    is_vendor = bool(ghl_user_id or has_vendor_tag or service_categories)
+                    # Priority 2: Match by email
+                    elif contact_email and contact_email in local_vendor_identifiers:
+                        is_vendor = True
+                        vendor_match = local_vendor_identifiers[contact_email]
+                        logger.debug(f"   Matched vendor by email: {vendor_match['name']}")
                     
                     if is_vendor:
                         all_vendors[contact_id] = contact
-                        logger.debug(f"   Found vendor: {contact.get('firstName')} {contact.get('lastName')} (GHL_ID: {bool(ghl_user_id)}, Tag: {has_vendor_tag}, Services: {bool(service_categories)})")
+                        matched_count += 1
                 
                 total_fetched += len(contacts)
                 self.stats['ghl_contacts_fetched'] = total_fetched
@@ -267,55 +280,76 @@ class EnhancedDatabaseSync:
     
     def _get_local_vendors(self) -> Dict[str, Dict]:
         """
-        Get all local vendors keyed by GHL contact ID
+        Get all local vendors - returns tuple of:
+        1. Dict keyed by GHL contact ID
+        2. Dict keyed by email (for vendors without GHL ID)
         """
         local_vendors_by_ghl_id = {}
-        local_vendors_without_ghl = []
+        local_vendors_by_email = {}
         
         try:
             vendors = simple_db_instance.get_vendors()
             
             for vendor in vendors:
                 ghl_contact_id = vendor.get('ghl_contact_id')
+                email = vendor.get('email', '').lower()
+                
                 if ghl_contact_id:
                     local_vendors_by_ghl_id[ghl_contact_id] = vendor
-                else:
-                    local_vendors_without_ghl.append(vendor)
+                elif email:  # No GHL ID but has email
+                    local_vendors_by_email[email] = vendor
             
             logger.info(f"✅ Found {len(local_vendors_by_ghl_id)} vendors with GHL IDs")
-            logger.info(f"   Found {len(local_vendors_without_ghl)} vendors without GHL IDs")
+            logger.info(f"   Found {len(local_vendors_by_email)} vendors without GHL IDs (by email)")
             
-            return local_vendors_by_ghl_id
+            return local_vendors_by_ghl_id, local_vendors_by_email
             
         except Exception as e:
             logger.error(f"❌ Error fetching local vendors: {e}")
             self.stats['errors'].append(f"Local fetch error: {str(e)}")
-            return {}
+            return {}, {}
     
-    def _process_vendor_sync(self, ghl_vendors: Dict, local_vendors: Dict):
+    def _process_vendor_sync(self, ghl_vendors: Dict, local_vendors_tuple: tuple):
         """
         Process the bi-directional sync:
         1. Update existing vendors
         2. Create new vendors from GHL
         3. Handle deleted vendors
         """
+        local_vendors_by_ghl_id, local_vendors_by_email = local_vendors_tuple
         
-        # Track processed GHL IDs
-        processed_ghl_ids = set()
+        # Track processed vendor IDs (local DB IDs)
+        processed_vendor_ids = set()
         
         # PART 1: Process vendors that exist in GHL
         for ghl_id, ghl_contact in ghl_vendors.items():
-            processed_ghl_ids.add(ghl_id)
+            contact_email = ghl_contact.get('email', '').lower()
+            matched_vendor = None
             
-            if ghl_id in local_vendors:
+            # Try to match by GHL contact ID first
+            if ghl_id in local_vendors_by_ghl_id:
+                matched_vendor = local_vendors_by_ghl_id[ghl_id]
+            # If no match by ID, try email
+            elif contact_email and contact_email in local_vendors_by_email:
+                matched_vendor = local_vendors_by_email[contact_email]
+                # Important: Update the vendor with the GHL contact ID
+                logger.info(f"   Matched vendor by email, adding GHL contact ID: {ghl_id}")
+            
+            if matched_vendor:
                 # UPDATE existing vendor
-                self._update_local_vendor(local_vendors[ghl_id], ghl_contact)
+                processed_vendor_ids.add(matched_vendor['id'])
+                # Ensure GHL contact ID is set
+                if not matched_vendor.get('ghl_contact_id'):
+                    matched_vendor['ghl_contact_id'] = ghl_id
+                self._update_local_vendor(matched_vendor, ghl_contact)
             else:
-                # CREATE new vendor in local DB
+                # CREATE new vendor in local DB (shouldn't happen if our matching works)
+                logger.warning(f"   Creating new vendor - not found by ID or email: {ghl_contact.get('email')}")
                 self._create_local_vendor(ghl_contact)
         
         # PART 2: Handle vendors that exist locally but not in GHL (deleted/missing)
-        missing_vendors = [v for ghl_id, v in local_vendors.items() if ghl_id not in processed_ghl_ids]
+        all_local_vendors = list(local_vendors_by_ghl_id.values()) + list(local_vendors_by_email.values())
+        missing_vendors = [v for v in all_local_vendors if v['id'] not in processed_vendor_ids]
         
         if missing_vendors:
             logger.info(f"📊 Found {len(missing_vendors)} vendors not in GHL sync results")
@@ -329,6 +363,11 @@ class EnhancedDatabaseSync:
         """Update existing local vendor with ALL GHL data fields"""
         try:
             updates = self._extract_vendor_updates(local_vendor, ghl_contact)
+            
+            # IMPORTANT: Ensure GHL contact ID is set if it wasn't before
+            if not local_vendor.get('ghl_contact_id') and ghl_contact.get('id'):
+                updates['ghl_contact_id'] = ghl_contact.get('id')
+                logger.info(f"   Setting GHL contact ID: {ghl_contact.get('id')}")
             
             if updates:
                 success = self._update_vendor_record(local_vendor['id'], updates)
@@ -576,15 +615,66 @@ class EnhancedDatabaseSync:
             return False
     
     def _fetch_all_ghl_leads(self) -> Dict[str, Dict]:
-        """Fetch ALL lead contacts from GHL (non-vendors)"""
+        """
+        Fetch GHL contacts that match existing leads in our database
+        
+        IMPORTANT: We should NOT create new leads during sync!
+        Leads are created by webhook form submissions only.
+        This sync only updates existing leads with latest GHL data.
+        
+        Matching strategy:
+        1. Match by GHL contact ID (most reliable)
+        2. Match by email address (fallback)
+        3. Check GHL opportunity ID if available
+        """
         all_leads = {}
         
         try:
+            # Get all local lead identifiers for matching
+            conn = simple_db_instance._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT ghl_contact_id, customer_email, ghl_opportunity_id, id
+                FROM leads 
+                WHERE (ghl_contact_id IS NOT NULL AND ghl_contact_id != '')
+                   OR (customer_email IS NOT NULL AND customer_email != '')
+            """)
+            
+            local_lead_contact_ids = set()
+            local_lead_emails = {}
+            local_lead_opportunity_ids = {}
+            lead_id_map = {}  # Map to track which local lead each GHL contact matches
+            
+            for row in cursor.fetchall():
+                if row[0]:  # Has GHL contact ID
+                    local_lead_contact_ids.add(row[0])
+                    lead_id_map[row[0]] = row[3]  # Map GHL ID to local lead ID
+                if row[1]:  # Has email
+                    email_lower = row[1].lower()
+                    local_lead_emails[email_lower] = row[3]  # Map email to local lead ID
+                if row[2]:  # Has GHL opportunity ID
+                    local_lead_opportunity_ids[row[2]] = row[3]  # Map opportunity ID to local lead ID
+            
+            conn.close()
+            
+            logger.info(f"   Found {len(local_lead_contact_ids)} leads with GHL contact IDs")
+            logger.info(f"   Found {len(local_lead_emails)} leads with emails")
+            logger.info(f"   Found {len(local_lead_opportunity_ids)} leads with opportunity IDs")
+            
+            if not local_lead_contact_ids and not local_lead_emails:
+                logger.info("   No leads with identifiers found - skipping lead sync")
+                return {}
+            
+            # Fetch ALL contacts from GHL and filter for our leads
+            # This is more reliable than individual fetches which can fail
             limit = 100
             offset = 0
+            matched_count = 0
+            
+            logger.info("   Fetching all GHL contacts to match with local leads...")
             
             while True:
-                logger.info(f"   Fetching GHL leads (offset: {offset}, limit: {limit})")
+                logger.debug(f"   Fetching GHL contacts batch (offset: {offset}, limit: {limit})")
                 
                 url = f"{self.ghl_api.v2_base_url}/contacts/"
                 headers = {
@@ -602,34 +692,97 @@ class EnhancedDatabaseSync:
                 response = requests.get(url, headers=headers, params=params)
                 
                 if response.status_code != 200:
+                    logger.error(f"❌ Failed to fetch GHL contacts: {response.status_code}")
                     break
                 
                 data = response.json()
                 contacts = data.get('contacts', [])
                 
                 if not contacts:
+                    logger.debug(f"   No more contacts to fetch")
                     break
                 
+                # Check each contact to see if it matches our leads
                 for contact in contacts:
                     contact_id = contact.get('id')
-                    custom_fields = {cf['id']: cf.get('value', '') 
-                                   for cf in contact.get('customFields', [])}
+                    contact_email = contact.get('email', '').lower() if contact.get('email') else ''
+                    matched = False
+                    match_type = ""
                     
-                    # Skip if it's a vendor (has GHL User ID)
-                    if custom_fields.get('HXVNT4y8OynNokWAfO2D'):
-                        continue
-                    
-                    # Check if it's a lead (has primary service category)
-                    if custom_fields.get('HRqfv0HnUydNRLKWhk27'):  # Primary Service Category
+                    # Priority 1: Match by GHL contact ID
+                    if contact_id in local_lead_contact_ids:
                         all_leads[contact_id] = contact
+                        matched = True
+                        match_type = "by contact ID"
+                    
+                    # Priority 2: Match by email (if not already matched)
+                    elif contact_email and contact_email in local_lead_emails:
+                        all_leads[contact_id] = contact
+                        matched = True
+                        match_type = "by email"
+                        # Update the local lead with the GHL contact ID if it was missing
+                        local_lead_id = local_lead_emails[contact_email]
+                        logger.info(f"   Found lead by email, updating GHL contact ID: {contact_id}")
+                    
+                    # Priority 3: Check opportunity fields in custom fields
+                    if not matched:
+                        custom_fields = contact.get('customFields', [])
+                        for field in custom_fields:
+                            # Check if any custom field contains an opportunity ID we're tracking
+                            field_value = field.get('value', '')
+                            if field_value in local_lead_opportunity_ids:
+                                all_leads[contact_id] = contact
+                                matched = True
+                                match_type = f"by opportunity ID: {field_value}"
+                                break
+                    
+                    if matched:
+                        matched_count += 1
+                        contact_name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip()
+                        logger.debug(f"   Matched lead {match_type}: {contact_name} ({contact_email})")
                 
-                if len(contacts) < limit:
+                # Continue to next batch
+                offset += limit
+                
+                # Stop if we've processed a reasonable amount
+                if offset > 10000:  # Safety limit - don't process more than 10k contacts
+                    logger.warning("   Reached 10,000 contact limit - stopping search")
                     break
                 
-                offset += limit
-                time.sleep(0.2)
+                time.sleep(0.2)  # Rate limiting
             
-            logger.info(f"✅ Fetched {len(all_leads)} lead contacts from GHL")
+            # Calculate total expected leads (some may be matched by email/opportunity)
+            total_expected = len(set(list(lead_id_map.values()) + list(local_lead_emails.values())))
+            logger.info(f"✅ Fetched {len(all_leads)} lead contacts from GHL out of {total_expected} local leads")
+            
+            # Check which local leads weren't matched
+            matched_local_ids = set()
+            for ghl_id in all_leads.keys():
+                if ghl_id in lead_id_map:
+                    matched_local_ids.add(lead_id_map[ghl_id])
+            
+            # Also check for leads matched by email
+            for contact in all_leads.values():
+                email = contact.get('email', '').lower() if contact.get('email') else ''
+                if email in local_lead_emails:
+                    matched_local_ids.add(local_lead_emails[email])
+            
+            # Find unmatched leads
+            all_local_ids = set(list(lead_id_map.values()) + list(local_lead_emails.values()))
+            unmatched_local_ids = all_local_ids - matched_local_ids
+            
+            if unmatched_local_ids:
+                logger.warning(f"⚠️ {len(unmatched_local_ids)} local leads not found in GHL")
+                # Get details of first 5 unmatched leads for debugging
+                conn = simple_db_instance._get_conn()
+                cursor = conn.cursor()
+                for lead_id in list(unmatched_local_ids)[:5]:
+                    cursor.execute("SELECT customer_email, ghl_contact_id FROM leads WHERE id = ?", (lead_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        logger.info(f"   Not found: Email: {row[0]}, GHL ID: {row[1]}")
+                conn.close()
+            
             return all_leads
             
         except Exception as e:
@@ -637,8 +790,13 @@ class EnhancedDatabaseSync:
             return {}
     
     def _get_local_leads(self) -> Dict[str, Dict]:
-        """Get all local leads keyed by GHL contact ID"""
+        """
+        Get all local leads - returns both:
+        1. Dict keyed by GHL contact ID
+        2. Dict keyed by email (for leads without GHL ID)
+        """
         local_leads_by_ghl_id = {}
+        local_leads_by_email = {}
         
         try:
             conn = simple_db_instance._get_conn()
@@ -648,7 +806,8 @@ class EnhancedDatabaseSync:
                 SELECT id, ghl_contact_id, customer_name, customer_email, 
                        customer_phone, primary_service_category, 
                        specific_service_requested, customer_zip_code,
-                       service_county, service_state, status, vendor_id
+                       service_county, service_state, status, vendor_id,
+                       ghl_opportunity_id
                 FROM leads
             """)
             
@@ -665,38 +824,61 @@ class EnhancedDatabaseSync:
                     'service_county': row[8],
                     'service_state': row[9],
                     'status': row[10],
-                    'vendor_id': row[11]
+                    'vendor_id': row[11],
+                    'ghl_opportunity_id': row[12] if len(row) > 12 else None
                 }
                 
+                # Index by GHL contact ID if available
                 if lead['ghl_contact_id']:
                     local_leads_by_ghl_id[lead['ghl_contact_id']] = lead
+                
+                # Also index by email for fallback matching
+                if lead['customer_email']:
+                    email_lower = lead['customer_email'].lower()
+                    local_leads_by_email[email_lower] = lead
             
             conn.close()
             
             logger.info(f"✅ Found {len(local_leads_by_ghl_id)} leads with GHL IDs")
-            return local_leads_by_ghl_id
+            logger.info(f"   Found {len(local_leads_by_email)} leads with emails")
+            
+            # Return combined dict - GHL ID takes precedence
+            combined = {}
+            combined.update(local_leads_by_email)  # Add email-indexed leads first
+            combined.update(local_leads_by_ghl_id)  # Override with GHL-ID indexed (more reliable)
+            
+            return combined
             
         except Exception as e:
             logger.error(f"❌ Error fetching local leads: {e}")
             return {}
     
     def _process_lead_sync(self, ghl_leads: Dict, local_leads: Dict):
-        """Process bi-directional lead sync"""
+        """
+        Process lead sync - ONLY updates existing leads
+        
+        IMPORTANT: We do NOT create new leads during sync!
+        Leads are only created through webhook form submissions.
+        This prevents duplicate leads from being created.
+        """
         processed_ghl_ids = set()
         
-        # Process leads that exist in GHL
+        # Process leads that exist in both GHL and local DB
         for ghl_id, ghl_contact in ghl_leads.items():
             processed_ghl_ids.add(ghl_id)
             
             if ghl_id in local_leads:
+                # UPDATE existing lead with latest GHL data
                 self._update_local_lead(local_leads[ghl_id], ghl_contact)
             else:
-                self._create_local_lead(ghl_contact)
+                # This shouldn't happen if our fetch logic is correct
+                # But if it does, log it as a warning - DO NOT CREATE
+                logger.warning(f"⚠️ GHL contact {ghl_id} fetched but not found in local leads - skipping")
         
-        # Handle leads that exist locally but not in GHL
+        # Handle leads that exist locally but not found in GHL
         for ghl_id, local_lead in local_leads.items():
             if ghl_id not in processed_ghl_ids:
-                # Lead exists locally but not found in GHL
+                # Lead exists locally but not found in GHL (might be deleted)
                 self._handle_missing_lead(local_lead)
     
     def _handle_missing_lead(self, local_lead: Dict):

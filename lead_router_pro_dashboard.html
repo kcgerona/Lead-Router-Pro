@@ -267,6 +267,9 @@
                 <button onclick="showTab('vendors')" class="tab-button px-3 py-2 text-sm font-medium rounded-md">
                     Vendor Management
                 </button>
+                <button onclick="showTab('leads')" class="tab-button px-3 py-2 text-sm font-medium rounded-md">
+                    Lead Management
+                </button>
                 <button onclick="showTab('configuration')" class="tab-button px-3 py-2 text-sm font-medium rounded-md">
                     System Configuration
                 </button>
@@ -400,12 +403,52 @@
             <div class="bg-white rounded-xl shadow-md p-6">
                 <div class="flex justify-between items-center mb-6">
                     <h3 class="text-lg font-semibold text-gray-900">Vendor Management</h3>
-                    <button onclick="loadVendors()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-                        Refresh Vendors
-                    </button>
+                    <div class="flex space-x-2">
+                        <label class="flex items-center">
+                            <input type="checkbox" id="showInactiveVendors" onchange="loadVendors()" class="mr-2">
+                            <span class="text-sm text-gray-600">Show Inactive</span>
+                        </label>
+                        <button onclick="loadVendors()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                            Refresh
+                        </button>
+                        <button onclick="deleteSelectedVendors()" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors hidden" id="bulkDeleteVendorsBtn">
+                            Delete Selected
+                        </button>
+                    </div>
                 </div>
                 <div id="vendorsList" class="overflow-x-auto">
                     <p class="text-gray-500">Loading vendors...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lead Management Tab -->
+        <div id="leadsTab" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-lg font-semibold text-gray-900">Lead Management</h3>
+                    <div class="flex space-x-2">
+                        <select id="leadStatusFilter" onchange="loadLeads()" class="px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="">All Status</option>
+                            <option value="new">New</option>
+                            <option value="assigned">Assigned</option>
+                            <option value="completed">Completed</option>
+                            <option value="inactive_ghl_deleted">Deleted from GHL</option>
+                        </select>
+                        <label class="flex items-center">
+                            <input type="checkbox" id="showInactiveLeads" onchange="loadLeads()" class="mr-2">
+                            <span class="text-sm text-gray-600">Show Inactive</span>
+                        </label>
+                        <button onclick="loadLeads()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+                            Refresh
+                        </button>
+                        <button onclick="deleteSelectedLeads()" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors hidden" id="bulkDeleteLeadsBtn">
+                            Delete Selected
+                        </button>
+                    </div>
+                </div>
+                <div id="leadsList" class="overflow-x-auto">
+                    <p class="text-gray-500">Loading leads...</p>
                 </div>
             </div>
         </div>
@@ -1361,39 +1404,48 @@ ${data.data.leads.map((lead, index) =>
 
         async function loadVendors() {
             try {
-                const response = await fetch(`${baseURL}/api/v1/simple-admin/vendors`);
+                const includeInactive = document.getElementById('showInactiveVendors').checked;
+                const url = `${baseURL}/api/v1/admin/vendors/filtered?include_inactive=${includeInactive}`;
+                const response = await fetch(url);
                 const data = await response.json();
                 const vendorsContainer = document.getElementById("vendorsList");
                 
-                if (data.status === "success" && data.data.length > 0) {
+                if (data.status === "success" && data.vendors && data.vendors.length > 0) {
                     let vendorsHTML = `
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
+                                    <th class="px-3 py-3 text-left">
+                                        <input type="checkbox" id="selectAllVendors" onchange="toggleAllVendors()" class="form-checkbox h-4 w-4 text-blue-600">
+                                    </th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Taking Work</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
                     `;
                     
-                    data.data.forEach(vendor => {
+                    data.vendors.forEach(vendor => {
                         const statusColors = {
                             active: "bg-green-100 text-green-800",
                             pending: "bg-yellow-100 text-yellow-800",
-                            inactive: "bg-red-100 text-red-800"
+                            inactive: "bg-red-100 text-red-800",
+                            missing_in_ghl: "bg-orange-100 text-orange-800",
+                            inactive_ghl_deleted: "bg-gray-100 text-gray-800"
                         };
                         const statusClass = statusColors[vendor.status] || "bg-gray-100 text-gray-800";
                         
-                        const performancePercent = vendor.performance_score 
-                            ? (vendor.performance_score * 100).toFixed(0) 
-                            : vendor.lead_close_percentage || 0;
+                        const performancePercent = vendor.lead_close_percentage || 0;
                         
                         vendorsHTML += `
                             <tr id="vendor-row-${vendor.id}">
+                                <td class="px-3 py-4">
+                                    <input type="checkbox" class="vendor-checkbox form-checkbox h-4 w-4 text-blue-600" value="${vendor.id}" onchange="updateVendorSelection()">
+                                </td>
                                 <td class="px-6 py-4 whitespace-nowrap">
                                     <div>
                                         <div class="text-sm font-medium text-gray-900">${vendor.name}</div>
@@ -1423,6 +1475,11 @@ ${data.data.leads.map((lead, index) =>
                                             ${vendor.taking_new_work ? 'Yes' : 'No'}
                                         </span>
                                     </label>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <button onclick="deleteVendor('${vendor.id}')" class="text-red-600 hover:text-red-900">
+                                        Delete
+                                    </button>
                                 </td>
                             </tr>
                         `;
@@ -1614,6 +1671,230 @@ ${data.data.leads.map((lead, index) =>
             // Close modal when clicking on overlay (not the content)
             if (event.target === event.currentTarget) {
                 closeUserGuide();
+            }
+        }
+        
+        // Vendor management functions
+        function toggleAllVendors() {
+            const selectAll = document.getElementById('selectAllVendors');
+            const checkboxes = document.querySelectorAll('.vendor-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateVendorSelection();
+        }
+
+        function updateVendorSelection() {
+            const checkboxes = document.querySelectorAll('.vendor-checkbox:checked');
+            const bulkBtn = document.getElementById('bulkDeleteVendorsBtn');
+            if (checkboxes.length > 0) {
+                bulkBtn.classList.remove('hidden');
+            } else {
+                bulkBtn.classList.add('hidden');
+            }
+        }
+
+        async function deleteVendor(vendorId) {
+            if (!confirm('Are you sure you want to permanently delete this vendor?')) return;
+            
+            try {
+                const response = await fetch(`${baseURL}/api/v1/admin/vendors/${vendorId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showAlert('success', result.message);
+                    loadVendors();
+                } else {
+                    showAlert('error', 'Failed to delete vendor');
+                }
+            } catch (error) {
+                console.error('Error deleting vendor:', error);
+                showAlert('error', 'Error deleting vendor');
+            }
+        }
+
+        async function deleteSelectedVendors() {
+            const checkboxes = document.querySelectorAll('.vendor-checkbox:checked');
+            const ids = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (ids.length === 0) return;
+            
+            if (!confirm(`Are you sure you want to permanently delete ${ids.length} vendor(s)?`)) return;
+            
+            try {
+                const response = await fetch(`${baseURL}/api/v1/admin/vendors/bulk-delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: ids })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showAlert('success', result.message);
+                    loadVendors();
+                } else {
+                    showAlert('error', 'Failed to delete vendors');
+                }
+            } catch (error) {
+                console.error('Error deleting vendors:', error);
+                showAlert('error', 'Error deleting vendors');
+            }
+        }
+
+        // Lead management functions
+        async function loadLeads() {
+            try {
+                const includeInactive = document.getElementById('showInactiveLeads').checked;
+                const statusFilter = document.getElementById('leadStatusFilter').value;
+                let url = `${baseURL}/api/v1/admin/leads/filtered?include_inactive=${includeInactive}`;
+                if (statusFilter) {
+                    url += `&status=${statusFilter}`;
+                }
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                const leadsContainer = document.getElementById("leadsList");
+                
+                if (data.status === "success" && data.leads && data.leads.length > 0) {
+                    let leadsHTML = `
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-3 py-3 text-left">
+                                        <input type="checkbox" id="selectAllLeads" onchange="toggleAllLeads()" class="form-checkbox h-4 w-4 text-blue-600">
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned To</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                    `;
+                    
+                    data.leads.forEach(lead => {
+                        const statusColors = {
+                            new: "bg-blue-100 text-blue-800",
+                            assigned: "bg-yellow-100 text-yellow-800",
+                            completed: "bg-green-100 text-green-800",
+                            inactive_ghl_deleted: "bg-red-100 text-red-800"
+                        };
+                        const statusClass = statusColors[lead.status] || "bg-gray-100 text-gray-800";
+                        
+                        const createdDate = new Date(lead.created_at).toLocaleDateString();
+                        
+                        leadsHTML += `
+                            <tr id="lead-row-${lead.id}">
+                                <td class="px-3 py-4">
+                                    <input type="checkbox" class="lead-checkbox form-checkbox h-4 w-4 text-blue-600" value="${lead.id}" onchange="updateLeadSelection()">
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <div>
+                                        <div class="text-sm font-medium text-gray-900">${lead.customer_name}</div>
+                                        <div class="text-sm text-gray-500">${lead.customer_email}</div>
+                                        <div class="text-sm text-gray-500">${lead.customer_phone}</div>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4">
+                                    <div class="text-sm text-gray-900">${lead.primary_service_category || 'N/A'}</div>
+                                    <div class="text-sm text-gray-500">${lead.specific_service_requested || ''}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
+                                        ${lead.status}
+                                    </span>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    ${lead.vendor_name || 'Unassigned'}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    ${createdDate}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <button onclick="deleteLead('${lead.id}')" class="text-red-600 hover:text-red-900">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    
+                    leadsHTML += "</tbody></table>";
+                    leadsContainer.innerHTML = leadsHTML;
+                } else {
+                    leadsContainer.innerHTML = '<p class="text-gray-500">No leads found</p>';
+                }
+            } catch (error) {
+                document.getElementById("leadsList").innerHTML = '<p class="text-red-500">Error loading leads</p>';
+                console.error('Error loading leads:', error);
+            }
+        }
+
+        function toggleAllLeads() {
+            const selectAll = document.getElementById('selectAllLeads');
+            const checkboxes = document.querySelectorAll('.lead-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateLeadSelection();
+        }
+
+        function updateLeadSelection() {
+            const checkboxes = document.querySelectorAll('.lead-checkbox:checked');
+            const bulkBtn = document.getElementById('bulkDeleteLeadsBtn');
+            if (checkboxes.length > 0) {
+                bulkBtn.classList.remove('hidden');
+            } else {
+                bulkBtn.classList.add('hidden');
+            }
+        }
+
+        async function deleteLead(leadId) {
+            if (!confirm('Are you sure you want to permanently delete this lead?')) return;
+            
+            try {
+                const response = await fetch(`${baseURL}/api/v1/admin/leads/${leadId}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showAlert('success', result.message);
+                    loadLeads();
+                } else {
+                    showAlert('error', 'Failed to delete lead');
+                }
+            } catch (error) {
+                console.error('Error deleting lead:', error);
+                showAlert('error', 'Error deleting lead');
+            }
+        }
+
+        async function deleteSelectedLeads() {
+            const checkboxes = document.querySelectorAll('.lead-checkbox:checked');
+            const ids = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (ids.length === 0) return;
+            
+            if (!confirm(`Are you sure you want to permanently delete ${ids.length} lead(s)?`)) return;
+            
+            try {
+                const response = await fetch(`${baseURL}/api/v1/admin/leads/bulk-delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: ids })
+                });
+                
+                const result = await response.json();
+                if (result.status === 'success') {
+                    showAlert('success', result.message);
+                    loadLeads();
+                } else {
+                    showAlert('error', 'Failed to delete leads');
+                }
+            } catch (error) {
+                console.error('Error deleting leads:', error);
+                showAlert('error', 'Error deleting leads');
             }
         }
         
