@@ -3,7 +3,7 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=postgresql://postgres:password@db:5432/smartleadrouter
       - REDIS_URL=redis://redis:6379
@@ -41,7 +41,7 @@ services:
   flask-webhook:
     build: .
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - GHL_PRIVATE_TOKEN=${GHL_PRIVATE_TOKEN}
       - GHL_LOCATION_ID=${GHL_LOCATION_ID}
