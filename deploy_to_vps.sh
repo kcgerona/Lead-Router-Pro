@@ -43,11 +43,11 @@ fi
 
 echo -e "${YELLOW}Step 2: System Updates and Security Setup...${NC}"
 run_on_vps "
-    export DEBIAN_FRONTEND=noninteractive
-    apt update && apt upgrade -y
-    apt install -y curl wget git htop nano ufw fail2ban python3 python3-pip python3-venv python3-dev
-    apt install -y build-essential libssl-dev libffi-dev python3-setuptools sqlite3 nginx redis-server
-    apt install -y certbot python3-certbot-nginx apache2-utils unattended-upgrades
+    apt update
+    apt install -y software-properties-common
+    add-apt-repository -y ppa:deadsnakes/ppa
+    apt update
+    apt install -y python3.11 python3.11-venv python3.11-dev build-essential libssl-dev libffi-dev python3-setuptools sqlite3 nginx redis-server certbot python3-certbot-nginx apache2-utils unattended-upgrades curl wget git htop nano ufw fail2ban
 "
 
 echo -e "${YELLOW}Step 3: Configuring Firewall...${NC}"
@@ -97,9 +97,9 @@ run_on_vps "
             git clone $REPO_URL
             cd Lead-Router-Pro
         fi
-        python3 -m venv venv
+        python3.11 -m venv venv
         source venv/bin/activate
-        pip install --upgrade pip
+        pip install --upgrade pip setuptools wheel
         pip install -r requirements.txt
     '
 "
