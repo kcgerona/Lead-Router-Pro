@@ -13,11 +13,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-VPS_IP="167.88.39.177"
+VPS_IP="165.22.34.21"
 VPS_USER="root"
-DOMAIN="dockside.life"
+DOMAIN="v2.dockside.life"
 APP_USER="leadrouter"
-REPO_URL="https://github.com/JoeMachado62/Lead-Router-Pro.git"
+REPO_URL="https://github.com/kcgerona/Lead-Router-Pro.git"
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}Lead Router Pro - VPS Deployment Script${NC}"
