@@ -23,7 +23,7 @@ class GHLFieldMapper:
     def _load_field_reference(self) -> Dict:
         """Load the field reference from JSON file"""
         try:
-            field_ref_path = Path("/root/Lead-Router-Pro/field_reference.json")
+            field_ref_path = Path("field_reference.json")
             if field_ref_path.exists():
                 with open(field_ref_path, 'r') as f:
                     data = json.load(f)

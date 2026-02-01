@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Main API application
   api:
@@ -17,7 +15,7 @@ services:
       - redis
     volumes:
       - .:/app
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   # PostgreSQL database
   db:

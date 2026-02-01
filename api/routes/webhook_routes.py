@@ -2935,7 +2935,7 @@ async def clean_webhook_health_check():
     try:
         import json
         from pathlib import Path
-        field_ref_path = Path("/root/Lead-Router-Pro/field_reference.json")
+        field_ref_path = Path("field_reference.json")
         if field_ref_path.exists():
             with open(field_ref_path, 'r') as f:
                 field_reference = json.load(f)
@@ -3005,7 +3005,7 @@ async def get_clean_field_mappings():
     try:
         import json
         from pathlib import Path
-        field_ref_path = Path("/root/Lead-Router-Pro/field_reference.json")
+        field_ref_path = Path("field_reference.json")
         if field_ref_path.exists():
             with open(field_ref_path, 'r') as f:
                 field_reference = json.load(f)
