@@ -109,14 +109,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
+# Include API routes - auth first to ensure it's registered before any potential conflicts
+app.include_router(auth_router)
 app.include_router(webhook_router)
 app.include_router(location_router)
 app.include_router(admin_router)
 app.include_router(simple_admin_router)
 app.include_router(field_mapping_router)
 app.include_router(security_admin_router)
-app.include_router(auth_router)
 app.include_router(routing_admin_router)
 app.include_router(vendor_toggle_router)
 app.include_router(lead_reassignment_router)

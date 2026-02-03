@@ -22,6 +22,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/auth", tags=["Authentication"])
 security = HTTPBearer()
 
+# Test endpoint
+@router.get("/test")
+async def test_endpoint():
+    """Test endpoint to verify router is working"""
+    return {"message": "Auth router is working"}
+
+@router.post("/test-post")
+async def test_post_endpoint():
+    """Test POST endpoint to verify POST routing works"""
+    return {"message": "Auth router POST is working"}
+
+@router.post("/login-simple")
+async def login_simple_test():
+    """Simplified login endpoint for testing"""
+    return {"message": "Simple login endpoint works"}
+
 # Pydantic models for request/response
 class LoginRequest(BaseModel):
     email: EmailStr

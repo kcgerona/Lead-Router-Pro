@@ -2,8 +2,6 @@ FROM python:3.11-slim-bullseye
 
 WORKDIR /app
 
-RUN cat /etc/resolv.conf
-
 # Install system dependencies
 RUN apt-get clean && \
     apt-get update && \
@@ -21,7 +19,6 @@ COPY . .
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \
-    && touch /app/smart_lead_router.db \
     && chown -R app:app /app
 USER app
 
@@ -33,4 +30,4 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000"]

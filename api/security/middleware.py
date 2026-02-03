@@ -130,7 +130,7 @@ class IPSecurityMiddleware(BaseHTTPMiddleware):
         
         # Skip for localhost accessing admin/health endpoints
         if client_ip in ["127.0.0.1", "::1", "localhost"]:
-            if any(path.startswith(prefix) for prefix in ["/api/v1/admin", "/health", "/docs", "/openapi.json"]):
+            if any(path.startswith(prefix) for prefix in ["/api/v1/admin", "/api/v1/auth", "/health", "/docs", "/openapi.json"]):
                 return True
         
         # Skip for whitelisted IPs accessing health checks

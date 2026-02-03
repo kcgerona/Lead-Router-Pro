@@ -134,7 +134,7 @@ class Account(Base):
 class Vendor(Base):
     __tablename__ = "vendors"
     
-    id = Column(get_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))  # Changed to TEXT to match simple_connection.py
     account_id = Column(get_uuid_column(), ForeignKey("accounts.id"), nullable=False)
     ghl_contact_id = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
@@ -155,15 +155,15 @@ class Vendor(Base):
     
     # Relationships
     account = relationship("Account", back_populates="vendors")
-    leads = relationship("Lead", back_populates="vendor")
-    performance_metrics = relationship("PerformanceMetric", back_populates="vendor")
+    # leads = relationship("Lead", back_populates="vendor")  # Temporarily disabled due to missing FK
+    # performance_metrics = relationship("PerformanceMetric", back_populates="vendor")  # Temporarily disabled due to missing FK
 
 class Lead(Base):
     __tablename__ = "leads"
     
-    id = Column(get_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))  # Changed to TEXT to match simple_connection.py
     account_id = Column(get_uuid_column(), ForeignKey("accounts.id"), nullable=False)
-    vendor_id = Column(get_uuid_column(), ForeignKey("vendors.id"))
+    vendor_id = Column(Text)  # Changed to TEXT to match vendors.id
     ghl_contact_id = Column(String(255), nullable=False)
     service_category = Column(String(100))
     service_details = Column(JSON, default={})
@@ -180,32 +180,33 @@ class Lead(Base):
     
     # Relationships
     account = relationship("Account", back_populates="leads")
-    vendor = relationship("Vendor", back_populates="leads")
-    feedback = relationship("Feedback", back_populates="lead")
+    # vendor = relationship("Vendor", back_populates="leads")  # Temporarily disabled due to missing FK
+    # feedback = relationship("Feedback", back_populates="lead")  # Temporarily disabled due to missing FK
 
 class PerformanceMetric(Base):
     __tablename__ = "performance_metrics"
     
     id = Column(get_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
-    vendor_id = Column(get_uuid_column(), ForeignKey("vendors.id"), nullable=False)
-    lead_id = Column(get_uuid_column(), ForeignKey("leads.id"))
+    vendor_id = Column(Text, nullable=False)  # Changed from UUID to TEXT to match vendors.id
+    lead_id = Column(Text)  # Changed from UUID to TEXT to match leads.id
     metric_type = Column(String(50), nullable=False)  # response_time, conversion, rating
     metric_value = Column(Float, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    vendor = relationship("Vendor", back_populates="performance_metrics")
+    # vendor = relationship("Vendor", back_populates="performance_metrics")  # Temporarily disabled due to missing FK
 
 class Feedback(Base):
     __tablename__ = "feedback"
     
     id = Column(get_uuid_column(), primary_key=True, default=lambda: str(uuid.uuid4()))
-    lead_id = Column(get_uuid_column(), ForeignKey("leads.id"), nullable=False)
-    vendor_id = Column(get_uuid_column(), ForeignKey("vendors.id"), nullable=False)
+    lead_id = Column(Text, nullable=False)  # Changed from UUID to TEXT to match leads.id
+    vendor_id = Column(Text, nullable=False)  # Changed from UUID to TEXT to match vendors.id
     rating = Column(Integer)  # 1-5 scale
     comments = Column(Text)
     feedback_type = Column(String(50), default="post_service")
     submitted_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    lead = relationship("Lead", back_populates="feedback")
+    # lead = relationship("Lead", back_populates="feedback")  # Temporarily disabled due to missing FK
+    # vendor = relationship("Vendor")  # Temporarily disabled due to missing FK
