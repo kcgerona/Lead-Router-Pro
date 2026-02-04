@@ -13,48 +13,60 @@ from api.services.auth_service import auth_service
 
 def create_tenant_if_not_exists(db: Session):
     """Create Dockside Pros tenant if it doesn't exist"""
+    # Get domain from environment or use default
+    domain = os.getenv("TENANT_DOMAIN", "docksidepros.com")
+    
     # Try to find by domain first
-    tenant = db.query(Tenant).filter(Tenant.domain == "docksidepros.com").first()
+    tenant = db.query(Tenant).filter(Tenant.domain == domain).first()
     
     if not tenant:
+        # Generate subdomain from domain
+        if "v2.dockside.life" in domain:
+            subdomain = "v2dockside"
+            name = "Dockside Pros V2"
+        elif "dockside.life" in domain:
+            subdomain = "dockside"
+            name = "Dockside Pros"
+        else:
+            subdomain = domain.split(".")[0]
+            name = "Dockside Pros"
+            
         # Check if subdomain is already taken
-        existing_subdomain = db.query(Tenant).filter(Tenant.subdomain == "dockside").first()
+        existing_subdomain = db.query(Tenant).filter(Tenant.subdomain == subdomain).first()
         if existing_subdomain:
             # Use a unique subdomain
-            subdomain = "docksidepros"
-        else:
-            subdomain = "dockside"
+            subdomain = f"{subdomain}tenant"
             
         tenant = Tenant(
-            name="Dockside Pros",
-            domain="docksidepros.com",
+            name=name,
+            domain=domain,
             subdomain=subdomain,
             is_active=True,
             subscription_tier=os.getenv("DEFAULT_SUBSCRIPTION_TIER", "pro"),
             max_users=100,
             settings={
                 "timezone": "America/New_York",
-                "notification_email": "info@docksidepros.com",
+                "notification_email": os.getenv("TENANT_NOTIFICATION_EMAIL", f"info@{domain}"),
                 "enable_smart_routing": True
             }
         )
         db.add(tenant)
         db.commit()
         db.refresh(tenant)
-        print(f"Created new tenant: {tenant.name} (subdomain: {subdomain})")
+        print(f"Created new tenant: {tenant.name} (subdomain: {subdomain}, domain: {domain})")
     else:
-        print(f"Found existing tenant: {tenant.name}")
+        print(f"Found existing tenant: {tenant.name} (domain: {tenant.domain})")
     
     return tenant
 
 def main():
     """Main function to create admin user"""
-    # User details
-    email = "info@docksidepros.com"
-    password = "Docksidepros@2025!"
-    first_name = "Admin"
-    last_name = "User"
-    role = "admin"
+    # User details from environment variables
+    email = os.getenv("ADMIN_EMAIL", "info@docksidepros.com")
+    password = os.getenv("ADMIN_PASSWORD", "Docksidepros@2025!")
+    first_name = os.getenv("ADMIN_FIRST_NAME", "Admin")
+    last_name = os.getenv("ADMIN_LAST_NAME", "User")
+    role = os.getenv("ADMIN_ROLE", "admin")
     
     # Create database tables if they don't exist
     print("Ensuring database tables exist...")
