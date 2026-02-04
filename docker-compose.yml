@@ -1,62 +1,73 @@
 services:
   # Main API application
   api:
-    build: .
-    dns:
-      - 8.8.8.8
+    container_name: dsp-api
+    build: . 
     ports:
-      - "8001:8000"
+      - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:password@db:5432/smartleadrouter
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/smartleadrouter
       - REDIS_URL=redis://redis:6379
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ENVIRONMENT=development
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ENVIRONMENT=production
     depends_on:
       - db
       - redis
     volumes:
       - .:/app
-    command: ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    networks: 
+      - app-network
+    command: ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000"]
 
   # PostgreSQL database
   db:
-    image: postgres:15
-    dns:
-      - 8.8.8.8
+    container_name: dsp-db
+    image: postgres:15 
     environment:
       - POSTGRES_DB=smartleadrouter
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks: 
+      - app-network
 
   # Redis for caching and sessions
   redis:
-    image: redis:7-alpine
-    dns:
-      - 8.8.8.8
+    container_name: dsp-redis
+    image: redis:7-alpine 
     ports:
       - "6380:6379"
-    volumes:
-      - redis_data:/data
+    volumes: 
+      - redis_data:/data 
+    networks: 
+      - app-network
 
   # Legacy Flask webhook server (for backward compatibility)
   flask-webhook:
-    build: .
-    dns:
-      - 8.8.8.8
+    build: . 
+    container_name: dsp-flask-webhook
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       - GHL_PRIVATE_TOKEN=${GHL_PRIVATE_TOKEN}
       - GHL_LOCATION_ID=${GHL_LOCATION_ID}
     command: ["python", "webhook_server.py"]
-    volumes:
-      - .:/app
+    volumes: 
+      - uploads_data:/app/uploads 
+      - logs_data:/app/logs 
+    networks: 
+      - app-network
 
-volumes:
-  postgres_data:
-  redis_data:
+networks: 
+  app-network: 
+    driver: bridge
+
+volumes: 
+  postgres_data: 
+  redis_data: 
+  uploads_data: 
+  logs_data:
