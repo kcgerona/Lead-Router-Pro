@@ -20,9 +20,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create non-root user
-RUN useradd --create-home --shell /bin/bash app \
-    && touch /app/smart_lead_router.db \
-    && chown -R app:app /app
+RUN useradd --create-home --shell /bin/bash app
+
+# Create necessary writable directories and set ownership
+RUN mkdir -p /app/security_data /app/uploads /app/logs && \
+    touch /app/smart_lead_router.db && \
+    chown -R app:app /app && \
+    chmod -R 775 /app/security_data /app/uploads /app/logs
+
+# Switch to non-root user
 USER app
 
 # Expose port
