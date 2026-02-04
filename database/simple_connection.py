@@ -146,7 +146,7 @@ class SimpleDatabase:
             activity_count = session.execute(text("SELECT COUNT(*) FROM activity_log")).scalar_one()
             
             # Get recent activity
-            recent_activity = session.execute(text("SELECT COUNT(*) FROM activity_log WHERE timestamp > datetime('now', '-24 hours')")).scalar_one()
+            recent_activity = session.execute(text("SELECT COUNT(*) FROM activity_log WHERE timestamp > NOW() - INTERVAL '24 hours'")).scalar_one()
             
             return {
                 "database_file": self.db_path,
