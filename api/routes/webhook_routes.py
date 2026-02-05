@@ -2979,21 +2979,31 @@ async def clean_webhook_health_check():
 async def get_clean_service_categories():
     """Return all supported service categories - Direct mapping only"""
     
-    # Group categories by type
+    # Group categories by type - handle nested dictionary structure
     categories_by_type = {}
-    for form_key, category in DOCKSIDE_PROS_SERVICES.items():
-        if category not in categories_by_type:
-            categories_by_type[category] = []
-        categories_by_type[category].append(form_key)
+    for form_key, category_data in DOCKSIDE_PROS_SERVICES.items():
+        # category_data might be a dict or string, handle both cases
+        if isinstance(category_data, dict):
+            # If it's a dict, use the keys as individual categories
+            for sub_category in category_data.keys():
+                if sub_category not in categories_by_type:
+                    categories_by_type[sub_category] = []
+                categories_by_type[sub_category].append(form_key)
+        else:
+            # If it's a string, use it directly
+            category = category_data
+            if category not in categories_by_type:
+                categories_by_type[category] = []
+            categories_by_type[category].append(form_key)
     
     return {
         "status": "success",
         "service_categories": categories_by_type,
-        "total_categories": len(set(DOCKSIDE_PROS_SERVICES.values())),
+        "total_categories": len([cat for cat in DOCKSIDE_PROS_SERVICES.values() if isinstance(cat, str)]),
         "total_form_identifiers": len(DOCKSIDE_PROS_SERVICES),
         "processing_method": "direct_mapping_no_ai",
         "ai_processing": "disabled",
-        "message": f"All {len(set(DOCKSIDE_PROS_SERVICES.values()))} marine service categories supported with direct form handling - NO AI"
+        "message": f"All service categories supported with direct form handling - NO AI"
     }
 
 # Get field mappings endpoint

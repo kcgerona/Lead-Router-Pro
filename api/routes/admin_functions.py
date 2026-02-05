@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
+from sqlalchemy import text
 
 # Import the proven components used by vendor widget
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -767,8 +768,7 @@ async def get_filtered_vendors(
     - Include/exclude inactive vendors
     """
     try:
-        conn = simple_db_instance._get_conn()
-        cursor = conn.cursor()
+        session = simple_db_instance._get_conn()
         
         query = """
             SELECT id, name, email, company_name, status, ghl_contact_id,
@@ -776,21 +776,21 @@ async def get_filtered_vendors(
             FROM vendors
             WHERE 1=1
         """
-        params = []
+        params = {}
         
         if status:
-            query += " AND status = ?"
-            params.append(status)
+            query += " AND status = :status"
+            params["status"] = status
         
         if not include_inactive:
             query += " AND status NOT IN ('inactive', 'missing_in_ghl', 'inactive_ghl_deleted')"
         
         query += " ORDER BY created_at DESC"
         
-        cursor.execute(query, params)
+        result = session.execute(text(query), params)
         vendors = []
         
-        for row in cursor.fetchall():
+        for row in result:
             vendors.append({
                 'id': row[0],
                 'name': row[1],
@@ -803,7 +803,7 @@ async def get_filtered_vendors(
                 'created_at': row[8]
             })
         
-        conn.close()
+        session.close()
         
         return {
             "status": "success",
@@ -901,8 +901,7 @@ async def get_filtered_leads(
     - Include/exclude inactive leads
     """
     try:
-        conn = simple_db_instance._get_conn()
-        cursor = conn.cursor()
+        session = simple_db_instance._get_conn()
         
         query = """
             SELECT l.id, l.customer_name, l.customer_email, l.customer_phone,
@@ -913,21 +912,21 @@ async def get_filtered_leads(
             LEFT JOIN vendors v ON l.vendor_id = v.id
             WHERE 1=1
         """
-        params = []
+        params = {}
         
         if status:
-            query += " AND l.status = ?"
-            params.append(status)
+            query += " AND l.status = :status"
+            params["status"] = status
         
         if not include_inactive:
             query += " AND l.status != 'inactive_ghl_deleted'"
         
         query += " ORDER BY l.created_at DESC"
         
-        cursor.execute(query, params)
+        result = session.execute(text(query), params)
         leads = []
         
-        for row in cursor.fetchall():
+        for row in result:
             leads.append({
                 'id': row[0],
                 'customer_name': row[1],
@@ -941,7 +940,7 @@ async def get_filtered_leads(
                 'vendor_name': row[9]
             })
         
-        conn.close()
+        session.close()
         
         return {
             "status": "success",

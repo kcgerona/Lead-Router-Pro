@@ -4,36 +4,27 @@ services:
     container_name: dsp-api
     build: . 
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/smartleadrouter
+      - DATABASE_URL=sqlite:///./data/smart_lead_router.db
       - REDIS_URL=redis://redis:6379
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ENVIRONMENT=production
+      - TENANT_DOMAIN=${DEFAULT_TENANT_DOMAIN}
+      - TENANT_NOTIFICATION_EMAIL=${TENANT_NOTIFICATION_EMAIL}
     depends_on:
-      - db
       - redis
     volumes:
       - .:/app
+      - sqlite_data:/app/data
     networks: 
       - app-network
     command: ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000"]
 
-  # PostgreSQL database
-  db:
-    container_name: dsp-db
-    image: postgres:15 
-    environment:
-      - POSTGRES_DB=smartleadrouter
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks: 
-      - app-network
+  # SQLite database (via volume mount)
+  # Note: SQLite doesn't need a separate container, we use volume mounts
+  # The database file will be stored in the sqlite_data volume
 
   # Redis for caching and sessions
   redis:
@@ -46,28 +37,51 @@ services:
     networks: 
       - app-network
 
-  # Legacy Flask webhook server (for backward compatibility)
-  flask-webhook:
-    build: . 
-    container_name: dsp-flask-webhook
-    ports:
-      - "127.0.0.1:3000:3000"
-    environment:
-      - GHL_PRIVATE_TOKEN=${GHL_PRIVATE_TOKEN}
-      - GHL_LOCATION_ID=${GHL_LOCATION_ID}
-    command: ["python", "webhook_server.py"]
-    volumes: 
-      - uploads_data:/app/uploads 
-      - logs_data:/app/logs 
-    networks: 
-      - app-network
+  # Legacy Flask webhook server (deprecated - webhooks now handled by main API)
+  # flask-webhook:
+  #   build: . 
+  #   container_name: dsp-flask-webhook
+  #   ports:
+  #     - "127.0.0.1:3000:3000"
+  #   environment:
+  #     - GHL_PRIVATE_TOKEN=${GHL_PRIVATE_TOKEN}
+  #     - GHL_LOCATION_ID=${GHL_LOCATION_ID}
+  #   command: ["python", "webhook_server.py"]
+  #   volumes: 
+  #     - uploads_data:/app/uploads 
+  #     - logs_data:/app/logs 
+  #     - sqlite_data:/app/data
+  #   networks: 
+  #     - app-network
 
+  # Database backup service (optional)
+  db-backup:
+    container_name: dsp-backup
+    image: alpine:latest
+    volumes:
+      - sqlite_data:/data
+      - ./backups:/backups
+    command: |
+      sh -c "
+      while true; do
+        echo 'Creating backup...'
+        cp /data/smart_lead_router.db /backups/smart_lead_router_$(date +%Y%m%d_%H%M%S).db
+        echo 'Backup completed'
+        sleep 86400
+      done
+      "
+    restart: unless-stopped
+    
 networks: 
   app-network: 
     driver: bridge
 
 volumes: 
-  postgres_data: 
+  sqlite_data:
+    driver: local
   redis_data: 
+    driver: local
   uploads_data: 
+    driver: local
   logs_data:
+    driver: local

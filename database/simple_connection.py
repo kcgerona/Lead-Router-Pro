@@ -145,8 +145,11 @@ class SimpleDatabase:
             lead_count = session.execute(text("SELECT COUNT(*) FROM leads")).scalar_one()
             activity_count = session.execute(text("SELECT COUNT(*) FROM activity_log")).scalar_one()
             
-            # Get recent activity
-            recent_activity = session.execute(text("SELECT COUNT(*) FROM activity_log WHERE timestamp > NOW() - INTERVAL '24 hours'")).scalar_one()
+            # Get recent activity (SQLite compatible)
+            if "sqlite" in self.db_path:
+                recent_activity = session.execute(text("SELECT COUNT(*) FROM activity_log WHERE timestamp > datetime('now', '-24 hours')")).scalar_one()
+            else:
+                recent_activity = session.execute(text("SELECT COUNT(*) FROM activity_log WHERE timestamp > NOW() - INTERVAL '24 hours'")).scalar_one()
             
             return {
                 "database_file": self.db_path,
@@ -379,36 +382,33 @@ class SimpleDatabase:
 
     def get_vendors(self, account_id: str = None, status: str = None) -> List[Dict[str, Any]]:
         """Get vendors with optional filtering - FIXED to use actual database field names"""
-        conn = None
+        session = self._get_conn()
         try:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            
             # Build dynamic query
             conditions = []
-            params = []
+            params = {}
             
             if account_id:
-                conditions.append("account_id = ?")
-                params.append(account_id)
+                conditions.append("account_id = :account_id")
+                params["account_id"] = account_id
             
             if status:
-                conditions.append("status = ?")
-                params.append(status)
+                conditions.append("status = :status")
+                params["status"] = status
             
             where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
             
-            # FIXED: Use actual database field names
-            cursor.execute(f'''
+            # FIXED: Use actual database field names with SQLAlchemy
+            result = session.execute(text(f'''
                 SELECT id, account_id, name, company_name, email, phone, ghl_contact_id, 
                        ghl_user_id, service_categories, services_offered, coverage_type,
                        coverage_states, coverage_counties, last_lead_assigned, lead_close_percentage,
                        status, taking_new_work, created_at, updated_at
                 FROM vendors{where_clause}
-            ''', params)
+            '''), params)
             
             vendors_list = []
-            for row in cursor.fetchall():
+            for row in result:
                 vendor = {
                     "id": row[0], "account_id": row[1], "name": row[2], "company_name": row[3],
                     "email": row[4], "phone": row[5], "ghl_contact_id": row[6], "ghl_user_id": row[7],
@@ -429,8 +429,7 @@ class SimpleDatabase:
             logger.error(f"❌ Get vendors error: {e}")
             return []
         finally:
-            if conn:
-                conn.close()
+            session.close()
 
     def get_vendor_by_email_and_account(self, email: str, account_id: str) -> Optional[Dict[str, Any]]:
         """Get vendor by email and account ID - FIXED to use correct column names"""
@@ -1008,27 +1007,38 @@ class SimpleDatabase:
 
     def get_leads(self, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get leads with optional account filtering (legacy method)"""
-        conn = None
+        session = self._get_conn()
         try:
-            conn = self._get_conn()
-            cursor = conn.cursor()
-            sql_query = "SELECT id, account_id, vendor_id, ghl_contact_id, service_category, customer_name, customer_email, customer_phone, service_details, estimated_value, priority_score, status, created_at FROM leads"
-            params = []
+            # Use actual column names from the database in correct order
+            sql_query = """
+                SELECT id, account_id, ghl_contact_id, customer_name, 
+                       customer_email, customer_phone, service_details, status, created_at
+                FROM leads
+            """
+            params = {}
             if account_id:
-                sql_query += " WHERE account_id = ?"
-                params.append(account_id)
+                sql_query += " WHERE account_id = :account_id"
+                params["account_id"] = account_id
             
-            cursor.execute(sql_query, params)
+            result = session.execute(text(sql_query), params)
             
             leads_list = []
-            for row in cursor.fetchall():
+            for row in result:
+                # Safely parse JSON, handle empty or invalid JSON
+                service_details = {}
+                if row[6]:  # service_details is at index 6 in our SELECT
+                    try:
+                        service_details = json.loads(row[6])
+                    except json.JSONDecodeError:
+                        # If JSON is invalid, store as raw string or empty dict
+                        service_details = {"raw_data": row[6]}
+                
                 leads_list.append({
-                    "id": row[0], "account_id": row[1], "vendor_id": row[2], 
-                    "ghl_contact_id": row[3], "service_category": row[4], 
-                    "customer_name": row[5], "customer_email": row[6], 
-                    "customer_phone": row[7], "service_details": json.loads(row[8]) if row[8] else {},
-                    "estimated_value": row[9], "priority_score": row[10], 
-                    "status": row[11], "created_at": row[12]
+                    "id": row[0], "account_id": row[1], "vendor_id": None,  # vendor_id not in SELECT
+                    "ghl_contact_id": row[2], "service_category": None,  # service_category not in SELECT
+                    "customer_name": row[3], "customer_email": row[4], 
+                    "customer_phone": row[5], "service_details": service_details,
+                    "status": row[7], "created_at": row[8]
                 })
             
             return leads_list
@@ -1037,8 +1047,7 @@ class SimpleDatabase:
             logger.error(f"❌ Get leads error: {e}")
             return []
         finally:
-            if conn:
-                conn.close()
+            session.close()
 
     def update_lead_opportunity_id(self, lead_id: str, ghl_opportunity_id: str) -> bool:
         """Update lead with GHL opportunity ID"""

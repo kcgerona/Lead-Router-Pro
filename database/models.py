@@ -10,7 +10,14 @@ Base = declarative_base()
 # Use String for UUID fields in SQLite, UUID for PostgreSQL
 def get_uuid_column():
     """Return appropriate UUID column type based on database URL"""
-    database_url = os.getenv("DATABASE_URL", "sqlite:///./smart_lead_router.db")
+    # Use same logic as simple_connection.py for consistency
+    if "DATABASE_URL" not in os.environ:
+        # Get the same absolute path used by SimpleDatabase
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        database_url = f"sqlite:///{os.path.join(project_dir, 'smart_lead_router.db')}"
+    else:
+        database_url = os.getenv("DATABASE_URL")
+    
     if "postgresql" in database_url:
         from sqlalchemy.dialects.postgresql import UUID
         return UUID(as_uuid=True)

@@ -66,7 +66,17 @@ class EmailService:
             return False
 
     async def send_2fa_code(self, to_email: str, code: str, user_name: str = None) -> bool:
-        """Send 2FA code email"""
+        """Send 2FA code email - non-blocking"""
+        try:
+            # Send email in background without blocking
+            asyncio.create_task(self._send_2fa_email_async(to_email, code, user_name))
+            return True
+        except Exception as e:
+            logger.error(f"Failed to queue 2FA email to {to_email}: {str(e)}")
+            return False
+
+    async def _send_2fa_email_async(self, to_email: str, code: str, user_name: str = None):
+        """Actually send the 2FA email asynchronously"""
         subject = "Your Dockside Pro Security Code"
         
         # HTML template
@@ -135,7 +145,8 @@ class EmailService:
         © 2025 Dockside Pro. All rights reserved.
         """
         
-        return await self.send_email(to_email, subject, html_body, text_body)
+        # Send email asynchronously (no return needed for background task)
+        await self.send_email(to_email, subject, html_body, text_body)
 
     async def send_password_reset(self, to_email: str, reset_code: str, user_name: str = None) -> bool:
         """Send password reset email"""
