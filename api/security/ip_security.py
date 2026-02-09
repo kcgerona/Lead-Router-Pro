@@ -12,6 +12,7 @@ from fastapi import Request, HTTPException
 from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
+SECURITY_FILE = os.getenv("SECURITY_FILE", "/app/storage/security/security_data.json")
 
 class IPSecurityManager:
     """
@@ -60,8 +61,8 @@ class IPSecurityManager:
         """Load blocked IPs and whitelist from persistent storage"""
         try:
             # Load from file if exists
-            if os.path.exists("security_data.json"):
-                with open("security_data.json", "r") as f:
+            if os.path.exists(SECURITY_FILE):
+                with open(SECURITY_FILE, "r") as f:
                     data = json.load(f)
                     
                 # Load blocked IPs (only those still valid)
@@ -88,7 +89,8 @@ class IPSecurityManager:
                 "saved_at": time.time()
             }
             
-            with open("security_data.json", "w") as f:
+            os.makedirs(os.path.dirname(SECURITY_FILE), exist_ok=True)
+            with open(SECURITY_FILE, "w") as f:
                 json.dump(data, f, indent=2)
                 
         except Exception as e:
