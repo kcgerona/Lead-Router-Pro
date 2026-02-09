@@ -11,18 +11,21 @@ from email.mime.multipart import MIMEMultipart
 from typing import Optional, List
 from jinja2 import Environment, FileSystemLoader
 import logging
+from config import AppConfig
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
     def __init__(self):
-        self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_username = os.getenv("SMTP_USERNAME")
-        self.smtp_password = os.getenv("SMTP_PASSWORD")
-        self.from_email = os.getenv("SMTP_FROM_EMAIL", "noreply@dockside.life")
-        self.from_name = os.getenv("SMTP_FROM_NAME", "Dockside Pro Security")
+        # Use centralized configuration
+        config = AppConfig()
+        self.smtp_host = config.SMTP_HOST or "smtp.gmail.com"
+        self.smtp_port = config.SMTP_PORT
+        self.smtp_username = config.SMTP_USERNAME
+        self.smtp_password = config.SMTP_PASSWORD
+        self.from_email = config.SMTP_FROM_EMAIL or "noreply@dockside.life"
+        self.from_name = config.SMTP_FROM_NAME or "Dockside Pro Security"
         
         # Setup Jinja2 for email templates
         self.template_env = Environment(
@@ -55,22 +58,101 @@ class EmailService:
             # Send email with timeout
             with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
                 server.starttls()
-                server.login(self.smtp_username, self.smtp_password)
+                # For SendGrid, use API key as password with 'apikey' as username
+                if self.smtp_host == 'smtp.sendgrid.net':
+                    server.login('apikey', self.smtp_password)
+                else:
+                    server.login(self.smtp_username, self.smtp_password)
                 server.send_message(msg)
 
             logger.info(f"Email sent successfully to {to_email}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send email to {to_email}: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Failed to send email to {to_email}: {error_msg}")
+            
+            # Check for specific SendGrid authentication errors
+            if "Authentication failed" in error_msg or "invalid, expired, or revoked" in error_msg:
+                logger.error("SendGrid API key authentication failed - please check SMTP_PASSWORD in .env file")
+            
             return False
 
     async def send_2fa_code(self, to_email: str, code: str, user_name: str = None) -> bool:
-        """Send 2FA code email - non-blocking"""
+        """Send 2FA code email - wait for completion to ensure it works"""
         try:
-            # Send email in background without blocking
-            asyncio.create_task(self._send_2fa_email_async(to_email, code, user_name))
-            return True
+            # Send email synchronously to ensure it works
+            subject = "Your Dockside Pro Security Code"
+            
+            # HTML template
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Security Code</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }}
+                    .container {{ max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+                    .header {{ text-align: center; margin-bottom: 30px; }}
+                    .logo {{ color: #2563eb; font-size: 24px; font-weight: bold; }}
+                    .code-container {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; text-align: center; margin: 20px 0; }}
+                    .code {{ font-size: 32px; font-weight: bold; letter-spacing: 4px; margin: 10px 0; }}
+                    .warning {{ background-color: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                    .footer {{ text-align: center; margin-top: 30px; color: #6c757d; font-size: 14px; }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="logo">🚤 Dockside Pro</div>
+                        <h2>Security Verification Code</h2>
+                    </div>
+                    
+                    <p>{"Hello " + user_name + "," if user_name else "Hello,"}</p>
+                    
+                    <p>You have requested to access your Dockside Pro account. Please use the following security code to complete your login:</p>
+                    
+                    <div class="code-container">
+                        <div>Your Security Code:</div>
+                        <div class="code">{code}</div>
+                        <div style="font-size: 14px; margin-top: 10px;">This code expires in 10 minutes</div>
+                    </div>
+                    
+                    <div class="warning">
+                        <strong>Security Notice:</strong> If you did not request this code, please ignore this email and consider changing your password. Never share this code with anyone.
+                    </div>
+                    
+                    <p>For security reasons, this code will expire in 10 minutes. If you need a new code, please request one from the login page.</p>
+                    
+                    <div class="footer">
+                        <p>This is an automated message from Dockside Pro Security System</p>
+                        <p>© 2025 Dockside Pro. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            # Text fallback
+            text_body = f"""
+            Dockside Pro Security Verification
+            
+            {"Hello " + user_name + "," if user_name else "Hello,"}
+            
+            Your security code is: {code}
+            
+            This code expires in 10 minutes.
+            
+            If you did not request this code, please ignore this email.
+            
+            © 2025 Dockside Pro. All rights reserved.
+            """
+            
+            # Send email synchronously and wait for result
+            return await self.send_email(to_email, subject, html_body, text_body)
+            
         except Exception as e:
             logger.error(f"Failed to queue 2FA email to {to_email}: {str(e)}")
             return False
