@@ -55,9 +55,15 @@ class EmailService:
             html_part = MIMEText(html_body, 'html')
             msg.attach(html_part)
 
-            # Send email with timeout
-            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
+            # Send email with increased timeout for better reliability
+            # Use SMTP_SSL for port 465, SMTP for other ports
+            if self.smtp_port == 465:
+                server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=60)
+            else:
+                server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=60)
                 server.starttls()
+            
+            with server:
                 # For SendGrid, use API key as password with 'apikey' as username
                 if self.smtp_host == 'smtp.sendgrid.net':
                     server.login('apikey', self.smtp_password)
