@@ -31,14 +31,24 @@ class AuthService:
 
     def hash_password(self, password: str) -> str:
         """Hash a password"""
+        # Truncate password to 72 characters for bcrypt compatibility
+        if len(password) > 72:
+            password = password[:72]
         return self.pwd_context.hash(password)
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
-        # Truncate password to 72 characters for bcrypt compatibility
-        if len(plain_password) > 72:
-            plain_password = plain_password[:72]
-        return self.pwd_context.verify(plain_password, hashed_password)
+        try:
+            # Truncate password to 72 characters for bcrypt compatibility
+            if len(plain_password) > 72:
+                plain_password = plain_password[:72]
+                print(f"Password truncated to 72 chars: {plain_password}")
+            return self.pwd_context.verify(plain_password, hashed_password)
+        except Exception as e:
+            print(f"Password verification error: {e}")
+            print(f"Plain password length: {len(plain_password)}")
+            print(f"Hashed password length: {len(hashed_password)}")
+            raise
 
     def generate_2fa_code(self) -> str:
         """Generate a random 2FA code"""
