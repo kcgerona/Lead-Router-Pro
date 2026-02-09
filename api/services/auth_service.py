@@ -35,6 +35,9 @@ class AuthService:
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash"""
+        # Truncate password to 72 characters for bcrypt compatibility
+        if len(plain_password) > 72:
+            plain_password = plain_password[:72]
         return self.pwd_context.verify(plain_password, hashed_password)
 
     def generate_2fa_code(self) -> str:
