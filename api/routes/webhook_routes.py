@@ -2,6 +2,7 @@
 
 import logging
 import json
+import os
 from typing import Dict, List, Any, Optional
 import time
 import uuid
@@ -877,37 +878,65 @@ def normalize_field_names(payload: Dict[str, Any]) -> Dict[str, Any]:
     
     return normalized_payload
 
+# Cached explicit form config (vendor_allowlist = only these create vendor records)
+_FORM_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+
+def _load_form_config() -> Dict[str, Any]:
+    """Load data/form_config.json. Vendor forms must be explicitly listed in vendor_allowlist."""
+    global _FORM_CONFIG_CACHE
+    if _FORM_CONFIG_CACHE is not None:
+        return _FORM_CONFIG_CACHE
+    try:
+        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        path = os.path.join(base, "data", "form_config.json")
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                _FORM_CONFIG_CACHE = json.load(f)
+        else:
+            _FORM_CONFIG_CACHE = {"vendor_allowlist": [], "form_type_overrides": {}}
+    except Exception as e:
+        logger.warning(f"Could not load form_config.json: {e}. Using defaults (no vendor forms from config).")
+        _FORM_CONFIG_CACHE = {"vendor_allowlist": [], "form_type_overrides": {}}
+    return _FORM_CONFIG_CACHE
+
 def get_form_configuration(form_identifier: str) -> Dict[str, Any]:
     """
-    Direct form configuration - NO AI processing
-    Returns configuration based on form identifier patterns
+    Form configuration: vendor forms ONLY from explicit allowlist (data/form_config.json).
+    All other forms are client leads by default. No keyword-based vendor detection.
     """
-    
-    # Extract service category using direct mapping
-    service_category = get_direct_service_category(form_identifier)
-    
-    # Determine form type based on identifier patterns
-    form_type = "unknown"
-    priority = "normal"
-    requires_immediate_routing = False
-    
-    if any(keyword in form_identifier.lower() for keyword in ["vendor", "network", "join", "application"]):
+    config = _load_form_config()
+    vendor_allowlist = [s.strip().lower() for s in config.get("vendor_allowlist", []) if s]
+    overrides = config.get("form_type_overrides", {}) or {}
+    fid_lower = form_identifier.lower().strip()
+
+    # 1) Explicit override (form_type_overrides in form_config.json)
+    override_value = None
+    for k, v in (overrides or {}).items():
+        if k.strip().lower() == fid_lower and v:
+            override_value = str(v).strip().lower()
+            break
+    if override_value and override_value in ("vendor_application", "emergency_service", "general_inquiry", "client_lead"):
+        form_type = override_value
+    # 2) Vendor ONLY if in allowlist (no keyword guess)
+    elif fid_lower in vendor_allowlist:
         form_type = "vendor_application"
-        requires_immediate_routing = False
-        priority = "normal"
-    elif any(keyword in form_identifier.lower() for keyword in ["emergency", "tow", "breakdown", "urgent"]):
-        form_type = "emergency_service"
-        requires_immediate_routing = True
-        priority = "high"
-    elif any(keyword in form_identifier.lower() for keyword in ["subscribe", "email", "contact", "inquiry"]):
-        form_type = "general_inquiry"
-        requires_immediate_routing = False
-        priority = "low"
+    # 3) Keyword fallback for non-vendor types only
     else:
+        if any(k in fid_lower for k in ["emergency", "tow", "breakdown", "urgent"]):
+            form_type = "emergency_service"
+        elif any(k in fid_lower for k in ["subscribe", "email", "contact", "inquiry"]):
+            form_type = "general_inquiry"
+        else:
+            form_type = "client_lead"
+
+    # Normalize
+    if form_type not in ("vendor_application", "emergency_service", "general_inquiry", "client_lead"):
         form_type = "client_lead"
-        requires_immediate_routing = True
-        priority = "normal"
-    
+
+    service_category = get_direct_service_category(form_identifier)
+    priority = "high" if form_type == "emergency_service" else "normal"
+    requires_immediate_routing = form_type in ("client_lead", "emergency_service")
+
     # Generate appropriate tags
     tags = [service_category, "DSP Elementor"]
     if form_type == "emergency_service":
@@ -1819,268 +1848,275 @@ async def process_elementor_webhook_async(
             else:
                 account_id = account_record["id"]
             
-            # Create vendor record in database
+            # Create vendor record in database ONLY when form is vendor AND payload looks like vendor
             if form_config.get("form_type") == "vendor_application" and final_ghl_contact_id:
-                try:
-                    # Extract vendor data from payload
-                    vendor_company_name = elementor_payload.get('vendor_company_name', '')
-                    vendor_first_name = elementor_payload.get('firstName', '')
-                    vendor_last_name = elementor_payload.get('lastName', '')
-                    vendor_email = elementor_payload.get('email', '')
-                    vendor_phone = elementor_payload.get('phone', '')
-                    
-                    # Process service categories - NEW LOGIC for primary + additional structure
-                    primary_service_category = elementor_payload.get('primary_service_category', '')
-                    service_categories = elementor_payload.get('service_categories', '')
-                    
-                    # Build final categories list (primary + additional up to 3 total)
-                    categories_list = []
-                    if primary_service_category:
-                        categories_list.append(primary_service_category)
-                        logger.info(f"📋 Primary service category: {primary_service_category}")
-                    
-                    if service_categories:
-                        # Parse additional categories from service_categories field
-                        additional_categories = [s.strip() for s in service_categories.split(',') if s.strip() and s.strip() != primary_service_category]
-                        categories_list.extend(additional_categories[:2])  # Max 2 additional
-                        logger.info(f"📋 Service categories: {service_categories}")
-                        logger.info(f"📋 Final categories list: {categories_list}")
-                    
-                    # Create JSON for database storage
-                    if categories_list:
-                        service_categories_json = json.dumps(categories_list)
-                        logger.info(f"📋 Final service categories JSON: {service_categories_json}")
-                    else:
-                        # Fallback if no categories provided
-                        service_categories_json = json.dumps(['General Services'])
-                        logger.warning(f"📋 No categories provided, using fallback")
-                    
-                    # CRITICAL FIX: Extract specific services offered using Level 3 when available
-                    # First, check for Level 3 services (most specific)
-                    primary_level3_services_raw = elementor_payload.get('primary_level3_services', {})
-                    additional_level3_services_raw = elementor_payload.get('additional_level3_services', {})
-                    
-                    # Parse Level 3 services - handle both JSON strings and dict/list formats
-                    primary_level3_services = {}
-                    additional_level3_services = {}
-                    
-                    # Parse primary Level 3 services
-                    if primary_level3_services_raw:
-                        if isinstance(primary_level3_services_raw, str):
-                            try:
-                                primary_level3_services = json.loads(primary_level3_services_raw)
-                                logger.info(f"📋 Parsed primary Level 3 services from JSON string")
-                            except json.JSONDecodeError:
-                                logger.warning(f"⚠️ Failed to parse primary Level 3 services JSON: {primary_level3_services_raw}")
-                                # Try to treat as comma-separated list
-                                primary_level3_services = {"services": [s.strip() for s in primary_level3_services_raw.split(',') if s.strip()]}
-                        elif isinstance(primary_level3_services_raw, dict):
-                            primary_level3_services = primary_level3_services_raw
-                        elif isinstance(primary_level3_services_raw, list):
-                            # If it's a flat list, convert to dict format
-                            primary_level3_services = {"services": primary_level3_services_raw}
-                    
-                    # Parse additional Level 3 services
-                    if additional_level3_services_raw:
-                        if isinstance(additional_level3_services_raw, str):
-                            try:
-                                additional_level3_services = json.loads(additional_level3_services_raw)
-                                logger.info(f"📋 Parsed additional Level 3 services from JSON string")
-                            except json.JSONDecodeError:
-                                logger.warning(f"⚠️ Failed to parse additional Level 3 services JSON: {additional_level3_services_raw}")
-                                # Try to treat as comma-separated list
-                                additional_level3_services = {"services": [s.strip() for s in additional_level3_services_raw.split(',') if s.strip()]}
-                        elif isinstance(additional_level3_services_raw, dict):
-                            additional_level3_services = additional_level3_services_raw
-                        elif isinstance(additional_level3_services_raw, list):
-                            # If it's a flat list, convert to dict format
-                            additional_level3_services = {"services": additional_level3_services_raw}
-                    
-                    services_list = []
-                    
-                    # Collect all Level 3 services
-                    if primary_level3_services and isinstance(primary_level3_services, dict):
-                        for subcategory, level3_list in primary_level3_services.items():
-                            if isinstance(level3_list, list):
-                                services_list.extend(level3_list)
-                                logger.info(f"📋 Level 3 services for {subcategory}: {level3_list}")
-                            elif isinstance(level3_list, str):
-                                # Handle case where value is a string instead of list
-                                services_list.extend([s.strip() for s in level3_list.split(',') if s.strip()])
-                                logger.info(f"📋 Level 3 services for {subcategory} (from string): {level3_list}")
-                    
-                    if additional_level3_services and isinstance(additional_level3_services, dict):
-                        for subcategory, level3_list in additional_level3_services.items():
-                            if isinstance(level3_list, list):
-                                services_list.extend(level3_list)
-                                logger.info(f"📋 Additional Level 3 services for {subcategory}: {level3_list}")
-                            elif isinstance(level3_list, str):
-                                # Handle case where value is a string instead of list
-                                services_list.extend([s.strip() for s in level3_list.split(',') if s.strip()])
-                                logger.info(f"📋 Additional Level 3 services for {subcategory} (from string): {level3_list}")
-                    
-                    # If no Level 3 services, fall back to services_provided field (Level 2 or combined)
-                    if not services_list:
-                        services_provided = elementor_payload.get('services_provided', '')
-                        if services_provided:
-                            # These are the Level 2 services or combined services
-                            services_list = [s.strip() for s in services_provided.split(',') if s.strip()]
-                            logger.info(f"📋 Using Level 2 services from services_provided: {services_list}")
+                # Safeguard: require at least one strong vendor-only field so lead forms never create vendors
+                has_vendor_company = bool((elementor_payload.get('vendor_company_name') or '').strip())
+                has_service_categories = bool((elementor_payload.get('primary_service_category') or '') or (elementor_payload.get('service_categories') or ''))
+                has_coverage = bool((elementor_payload.get('coverage_type') or '') or (elementor_payload.get('coverage_counties') or elementor_payload.get('service_zip_codes') or ''))
+                if not (has_vendor_company or has_service_categories or has_coverage):
+                    logger.info(f"⏭️ Skipping vendor creation: form is vendor_application but payload has no vendor_company_name, service categories, or coverage (likely a lead form misconfigured)")
+                else:
+                    try:
+                        # Extract vendor data from payload
+                        vendor_company_name = elementor_payload.get('vendor_company_name', '')
+                        vendor_first_name = elementor_payload.get('firstName', '')
+                        vendor_last_name = elementor_payload.get('lastName', '')
+                        vendor_email = elementor_payload.get('email', '')
+                        vendor_phone = elementor_payload.get('phone', '')
+                        
+                        # Process service categories - NEW LOGIC for primary + additional structure
+                        primary_service_category = elementor_payload.get('primary_service_category', '')
+                        service_categories = elementor_payload.get('service_categories', '')
+                        
+                        # Build final categories list (primary + additional up to 3 total)
+                        categories_list = []
+                        if primary_service_category:
+                            categories_list.append(primary_service_category)
+                            logger.info(f"📋 Primary service category: {primary_service_category}")
+                        
+                        if service_categories:
+                            # Parse additional categories from service_categories field
+                            additional_categories = [s.strip() for s in service_categories.split(',') if s.strip() and s.strip() != primary_service_category]
+                            categories_list.extend(additional_categories[:2])  # Max 2 additional
+                            logger.info(f"📋 Service categories: {service_categories}")
+                            logger.info(f"📋 Final categories list: {categories_list}")
+                        
+                        # Create JSON for database storage
+                        if categories_list:
+                            service_categories_json = json.dumps(categories_list)
+                            logger.info(f"📋 Final service categories JSON: {service_categories_json}")
                         else:
-                            # If still no services, try to use primary_services and additional_services (Level 2)
-                            primary_services = elementor_payload.get('primary_services', [])
-                            additional_services = elementor_payload.get('additional_services', [])
-                            
-                            if isinstance(primary_services, list):
-                                services_list.extend(primary_services)
-                            elif isinstance(primary_services, str) and primary_services:
-                                services_list.extend([s.strip() for s in primary_services.split(',') if s.strip()])
-                            
-                            if isinstance(additional_services, list):
-                                services_list.extend(additional_services)
-                            elif isinstance(additional_services, str) and additional_services:
-                                services_list.extend([s.strip() for s in additional_services.split(',') if s.strip()])
-                            
-                            if services_list:
-                                logger.info(f"📋 Using Level 2 services from primary/additional: {services_list}")
+                            # Fallback if no categories provided
+                            service_categories_json = json.dumps(['General Services'])
+                            logger.warning(f"📋 No categories provided, using fallback")
                     
-                    # Store the final services list
-                    if services_list:
-                        services_offered_json = json.dumps(services_list)
-                        logger.info(f"✅ Final services offered for vendor: {services_list}")
-                    else:
-                        services_offered_json = json.dumps([])
-                        logger.warning(f"⚠️ No specific services provided for vendor")
+                        # CRITICAL FIX: Extract specific services offered using Level 3 when available
+                        # First, check for Level 3 services (most specific)
+                        primary_level3_services_raw = elementor_payload.get('primary_level3_services', {})
+                        additional_level3_services_raw = elementor_payload.get('additional_level3_services', {})
                     
-                    # Extract coverage type and coverage areas
-                    coverage_type = elementor_payload.get('coverage_type', 'county')
-                    logger.info(f"📋 Coverage type: {coverage_type}")
+                        # Parse Level 3 services - handle both JSON strings and dict/list formats
+                        primary_level3_services = {}
+                        additional_level3_services = {}
                     
-                    # Handle coverage states (for state-level coverage)
-                    coverage_states = elementor_payload.get('coverage_states', [])
-                    if isinstance(coverage_states, list):
-                        coverage_states_json = json.dumps(coverage_states)
-                        logger.info(f"📋 Coverage states: {coverage_states}")
-                    elif isinstance(coverage_states, str) and coverage_states:
-                        # If it's a comma-separated string
-                        states_list = [s.strip() for s in coverage_states.split(',') if s.strip()]
-                        coverage_states_json = json.dumps(states_list)
-                        logger.info(f"📋 Coverage states parsed from string: {states_list}")
-                    else:
-                        coverage_states_json = json.dumps([])
+                        # Parse primary Level 3 services
+                        if primary_level3_services_raw:
+                            if isinstance(primary_level3_services_raw, str):
+                                try:
+                                    primary_level3_services = json.loads(primary_level3_services_raw)
+                                    logger.info(f"📋 Parsed primary Level 3 services from JSON string")
+                                except json.JSONDecodeError:
+                                    logger.warning(f"⚠️ Failed to parse primary Level 3 services JSON: {primary_level3_services_raw}")
+                                    # Try to treat as comma-separated list
+                                    primary_level3_services = {"services": [s.strip() for s in primary_level3_services_raw.split(',') if s.strip()]}
+                            elif isinstance(primary_level3_services_raw, dict):
+                                primary_level3_services = primary_level3_services_raw
+                            elif isinstance(primary_level3_services_raw, list):
+                                # If it's a flat list, convert to dict format
+                                primary_level3_services = {"services": primary_level3_services_raw}
                     
-                    # Handle coverage data based on coverage type
-                    service_coverage_area = elementor_payload.get('service_coverage_area', '')
-                    coverage_counties_json = json.dumps([])
+                        # Parse additional Level 3 services
+                        if additional_level3_services_raw:
+                            if isinstance(additional_level3_services_raw, str):
+                                try:
+                                    additional_level3_services = json.loads(additional_level3_services_raw)
+                                    logger.info(f"📋 Parsed additional Level 3 services from JSON string")
+                                except json.JSONDecodeError:
+                                    logger.warning(f"⚠️ Failed to parse additional Level 3 services JSON: {additional_level3_services_raw}")
+                                    # Try to treat as comma-separated list
+                                    additional_level3_services = {"services": [s.strip() for s in additional_level3_services_raw.split(',') if s.strip()]}
+                            elif isinstance(additional_level3_services_raw, dict):
+                                additional_level3_services = additional_level3_services_raw
+                            elif isinstance(additional_level3_services_raw, list):
+                                # If it's a flat list, convert to dict format
+                                additional_level3_services = {"services": additional_level3_services_raw}
                     
-                    # Process coverage data based on type
-                    if coverage_type == 'state':
-                        # Already handled above in coverage_states
-                        pass
+                        services_list = []
                     
-                    elif coverage_type == 'county':
-                        # Handle county coverage from the widget
-                        coverage_counties = elementor_payload.get('coverage_counties', [])
-                        if isinstance(coverage_counties, list) and coverage_counties:
-                            coverage_counties_json = json.dumps(coverage_counties)
-                            logger.info(f"📋 Coverage counties: {coverage_counties}")
-                        elif isinstance(coverage_counties, str) and coverage_counties:
-                            # Parse comma-separated counties
-                            counties_list = [c.strip() for c in coverage_counties.split(',') if c.strip()]
-                            coverage_counties_json = json.dumps(counties_list)
-                            logger.info(f"📋 Parsed coverage counties: {counties_list}")
+                        # Collect all Level 3 services
+                        if primary_level3_services and isinstance(primary_level3_services, dict):
+                            for subcategory, level3_list in primary_level3_services.items():
+                                if isinstance(level3_list, list):
+                                    services_list.extend(level3_list)
+                                    logger.info(f"📋 Level 3 services for {subcategory}: {level3_list}")
+                                elif isinstance(level3_list, str):
+                                    # Handle case where value is a string instead of list
+                                    services_list.extend([s.strip() for s in level3_list.split(',') if s.strip()])
+                                    logger.info(f"📋 Level 3 services for {subcategory} (from string): {level3_list}")
                     
-                    elif coverage_type == 'zip':
-                        # Handle ZIP code coverage
-                        service_zip_codes = elementor_payload.get('service_zip_codes', '')
-                        if service_zip_codes:
-                            # Check if we have converted counties from earlier ZIP conversion
-                            converted_counties = elementor_payload.get('_converted_counties', [])
-                            if converted_counties:
-                                coverage_counties_json = json.dumps(converted_counties)
-                                logger.info(f"📋 Using converted counties from ZIP codes: {converted_counties}")
+                        if additional_level3_services and isinstance(additional_level3_services, dict):
+                            for subcategory, level3_list in additional_level3_services.items():
+                                if isinstance(level3_list, list):
+                                    services_list.extend(level3_list)
+                                    logger.info(f"📋 Additional Level 3 services for {subcategory}: {level3_list}")
+                                elif isinstance(level3_list, str):
+                                    # Handle case where value is a string instead of list
+                                    services_list.extend([s.strip() for s in level3_list.split(',') if s.strip()])
+                                    logger.info(f"📋 Additional Level 3 services for {subcategory} (from string): {level3_list}")
+                    
+                        # If no Level 3 services, fall back to services_provided field (Level 2 or combined)
+                        if not services_list:
+                            services_provided = elementor_payload.get('services_provided', '')
+                            if services_provided:
+                                # These are the Level 2 services or combined services
+                                services_list = [s.strip() for s in services_provided.split(',') if s.strip()]
+                                logger.info(f"📋 Using Level 2 services from services_provided: {services_list}")
                             else:
-                                # Store ZIP codes as coverage
-                                if isinstance(service_zip_codes, str):
-                                    zips_list = [z.strip() for z in service_zip_codes.split(',') if z.strip()]
-                                    coverage_counties_json = json.dumps(zips_list)
-                                    logger.info(f"📋 Storing ZIP codes as coverage: {zips_list}")
-                    
-                    elif coverage_type in ['global', 'national']:
-                        # For global/national, we store empty counties but note in service_coverage_area
-                        coverage_counties_json = json.dumps([])
-                        logger.info(f"🌍 {coverage_type.title()} coverage - no specific counties")
-                    
-                    logger.info(f"🗺️ Final coverage data:")
-                    logger.info(f"   Coverage Type: {coverage_type}")
-                    logger.info(f"   Coverage States: {coverage_states_json}")
-                    logger.info(f"   Coverage Counties: {coverage_counties_json}")
-                    logger.info(f"   Service Categories: {service_categories_json}")
-                    logger.info(f"   Services Offered: {services_offered_json}")
-                    
-                    # Note: account_id is already initialized above for all form types
-                    
-                    # Check if vendor already exists
-                    existing_vendor = simple_db_instance.get_vendor_by_email_and_account(vendor_email, account_id)
-                    
-                    if existing_vendor:
-                        logger.info(f"📋 Vendor already exists: {existing_vendor['id']}")
-                        vendor_id = existing_vendor['id']
-                        
-                        # Update existing vendor with new information
-                        try:
-                            # Update service categories and coverage if provided
-                            update_data = {}
-                            if service_categories_json != json.dumps(['General Services']):
-                                update_data['service_categories'] = service_categories_json
-                            if coverage_counties_json != json.dumps([]):
-                                update_data['coverage_counties'] = coverage_counties_json
+                                # If still no services, try to use primary_services and additional_services (Level 2)
+                                primary_services = elementor_payload.get('primary_services', [])
+                                additional_services = elementor_payload.get('additional_services', [])
                             
-                            if update_data:
-                                # You may need to add an update_vendor method to simple_db_instance
-                                logger.info(f"🔄 Would update vendor {vendor_id} with: {update_data}")
-                        except Exception as update_error:
-                            logger.warning(f"⚠️ Failed to update existing vendor: {update_error}")
-                    else:
-                        # Create new vendor record
-                        primary_category = elementor_payload.get('primary_service_category', '')
-                        taking_work = elementor_payload.get('taking_new_work', 'Yes') == 'Yes'
+                                if isinstance(primary_services, list):
+                                    services_list.extend(primary_services)
+                                elif isinstance(primary_services, str) and primary_services:
+                                    services_list.extend([s.strip() for s in primary_services.split(',') if s.strip()])
+                            
+                                if isinstance(additional_services, list):
+                                    services_list.extend(additional_services)
+                                elif isinstance(additional_services, str) and additional_services:
+                                    services_list.extend([s.strip() for s in additional_services.split(',') if s.strip()])
+                            
+                                if services_list:
+                                    logger.info(f"📋 Using Level 2 services from primary/additional: {services_list}")
+                    
+                        # Store the final services list
+                        if services_list:
+                            services_offered_json = json.dumps(services_list)
+                            logger.info(f"✅ Final services offered for vendor: {services_list}")
+                        else:
+                            services_offered_json = json.dumps([])
+                            logger.warning(f"⚠️ No specific services provided for vendor")
+                    
+                        # Extract coverage type and coverage areas
+                        coverage_type = elementor_payload.get('coverage_type', 'county')
+                        logger.info(f"📋 Coverage type: {coverage_type}")
+                    
+                        # Handle coverage states (for state-level coverage)
+                        coverage_states = elementor_payload.get('coverage_states', [])
+                        if isinstance(coverage_states, list):
+                            coverage_states_json = json.dumps(coverage_states)
+                            logger.info(f"📋 Coverage states: {coverage_states}")
+                        elif isinstance(coverage_states, str) and coverage_states:
+                            # If it's a comma-separated string
+                            states_list = [s.strip() for s in coverage_states.split(',') if s.strip()]
+                            coverage_states_json = json.dumps(states_list)
+                            logger.info(f"📋 Coverage states parsed from string: {states_list}")
+                        else:
+                            coverage_states_json = json.dumps([])
+                    
+                        # Handle coverage data based on coverage type
+                        service_coverage_area = elementor_payload.get('service_coverage_area', '')
+                        coverage_counties_json = json.dumps([])
+                    
+                        # Process coverage data based on type
+                        if coverage_type == 'state':
+                            # Already handled above in coverage_states
+                            pass
+                    
+                        elif coverage_type == 'county':
+                            # Handle county coverage from the widget
+                            coverage_counties = elementor_payload.get('coverage_counties', [])
+                            if isinstance(coverage_counties, list) and coverage_counties:
+                                coverage_counties_json = json.dumps(coverage_counties)
+                                logger.info(f"📋 Coverage counties: {coverage_counties}")
+                            elif isinstance(coverage_counties, str) and coverage_counties:
+                                # Parse comma-separated counties
+                                counties_list = [c.strip() for c in coverage_counties.split(',') if c.strip()]
+                                coverage_counties_json = json.dumps(counties_list)
+                                logger.info(f"📋 Parsed coverage counties: {counties_list}")
+                    
+                        elif coverage_type == 'zip':
+                            # Handle ZIP code coverage
+                            service_zip_codes = elementor_payload.get('service_zip_codes', '')
+                            if service_zip_codes:
+                                # Check if we have converted counties from earlier ZIP conversion
+                                converted_counties = elementor_payload.get('_converted_counties', [])
+                                if converted_counties:
+                                    coverage_counties_json = json.dumps(converted_counties)
+                                    logger.info(f"📋 Using converted counties from ZIP codes: {converted_counties}")
+                                else:
+                                    # Store ZIP codes as coverage
+                                    if isinstance(service_zip_codes, str):
+                                        zips_list = [z.strip() for z in service_zip_codes.split(',') if z.strip()]
+                                        coverage_counties_json = json.dumps(zips_list)
+                                        logger.info(f"📋 Storing ZIP codes as coverage: {zips_list}")
+                    
+                        elif coverage_type in ['global', 'national']:
+                            # For global/national, we store empty counties but note in service_coverage_area
+                            coverage_counties_json = json.dumps([])
+                            logger.info(f"🌍 {coverage_type.title()} coverage - no specific counties")
+                    
+                        logger.info(f"🗺️ Final coverage data:")
+                        logger.info(f"   Coverage Type: {coverage_type}")
+                        logger.info(f"   Coverage States: {coverage_states_json}")
+                        logger.info(f"   Coverage Counties: {coverage_counties_json}")
+                        logger.info(f"   Service Categories: {service_categories_json}")
+                        logger.info(f"   Services Offered: {services_offered_json}")
+                    
+                        # Note: account_id is already initialized above for all form types
+                    
+                        # Check if vendor already exists
+                        existing_vendor = simple_db_instance.get_vendor_by_email_and_account(vendor_email, account_id)
+                    
+                        if existing_vendor:
+                            logger.info(f"📋 Vendor already exists: {existing_vendor['id']}")
+                            vendor_id = existing_vendor['id']
                         
-                        vendor_id = simple_db_instance.create_vendor(
-                            account_id=account_id,
-                            name=f"{vendor_first_name} {vendor_last_name}".strip(),
-                            email=vendor_email,
-                            company_name=vendor_company_name,
-                            phone=vendor_phone,
-                            ghl_contact_id=final_ghl_contact_id,
-                            status='pending',  # Start as pending until approved
-                            service_categories=service_categories_json,  # Categories like "Boat Maintenance"
-                            services_offered=services_offered_json,      # Specific services like "Boat Detailing"
-                            coverage_type=coverage_type,                 # state, county, zip, etc.
-                            coverage_states=coverage_states_json,        # ["FL", "GA"] for state coverage
-                            coverage_counties=coverage_counties_json,    # Counties or ZIP codes
-                            primary_service_category=primary_category,   # Primary category from multi-step flow
-                            taking_new_work=taking_work                  # Boolean for taking new work
-                        )
-                        logger.info(f"✅ Created vendor record: {vendor_id}")
-                        logger.info(f"   Company: {vendor_company_name}")
-                        logger.info(f"   Name: {vendor_first_name} {vendor_last_name}")
-                        logger.info(f"   Email: {vendor_email}")
-                        logger.info(f"   Services: {service_categories_json}")
-                        logger.info(f"   Coverage: {coverage_counties_json}")
+                            # Update existing vendor with new information
+                            try:
+                                # Update service categories and coverage if provided
+                                update_data = {}
+                                if service_categories_json != json.dumps(['General Services']):
+                                    update_data['service_categories'] = service_categories_json
+                                if coverage_counties_json != json.dumps([]):
+                                    update_data['coverage_counties'] = coverage_counties_json
+                            
+                                if update_data:
+                                    # You may need to add an update_vendor method to simple_db_instance
+                                    logger.info(f"🔄 Would update vendor {vendor_id} with: {update_data}")
+                            except Exception as update_error:
+                                logger.warning(f"⚠️ Failed to update existing vendor: {update_error}")
+                        else:
+                            # Create new vendor record
+                            primary_category = elementor_payload.get('primary_service_category', '')
+                            taking_work = elementor_payload.get('taking_new_work', 'Yes') == 'Yes'
+                        
+                            vendor_id = simple_db_instance.create_vendor(
+                                account_id=account_id,
+                                name=f"{vendor_first_name} {vendor_last_name}".strip(),
+                                email=vendor_email,
+                                company_name=vendor_company_name,
+                                phone=vendor_phone,
+                                ghl_contact_id=final_ghl_contact_id,
+                                status='pending',  # Start as pending until approved
+                                service_categories=service_categories_json,  # Categories like "Boat Maintenance"
+                                services_offered=services_offered_json,      # Specific services like "Boat Detailing"
+                                coverage_type=coverage_type,                 # state, county, zip, etc.
+                                coverage_states=coverage_states_json,        # ["FL", "GA"] for state coverage
+                                coverage_counties=coverage_counties_json,    # Counties or ZIP codes
+                                primary_service_category=primary_category,   # Primary category from multi-step flow
+                                taking_new_work=taking_work                  # Boolean for taking new work
+                            )
+                            logger.info(f"✅ Created vendor record: {vendor_id}")
+                            logger.info(f"   Company: {vendor_company_name}")
+                            logger.info(f"   Name: {vendor_first_name} {vendor_last_name}")
+                            logger.info(f"   Email: {vendor_email}")
+                            logger.info(f"   Services: {service_categories_json}")
+                            logger.info(f"   Coverage: {coverage_counties_json}")
                     
-                except Exception as e:
-                    logger.error(f"❌ Failed to create vendor record: {str(e)}")
-                    logger.error(f"   Error type: {type(e).__name__}")
-                    logger.error(f"   Service categories selected: {elementor_payload.get('service_categories_selected', 'NOT_FOUND')}")
-                    logger.error(f"   Vendor company name: {elementor_payload.get('vendor_company_name', 'NOT_FOUND')}")
-                    logger.error(f"   Service zip codes: {elementor_payload.get('service_zip_codes', 'NOT_FOUND')}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create vendor record: {str(e)}")
+                        logger.error(f"   Error type: {type(e).__name__}")
+                        logger.error(f"   Service categories selected: {elementor_payload.get('service_categories_selected', 'NOT_FOUND')}")
+                        logger.error(f"   Vendor company name: {elementor_payload.get('vendor_company_name', 'NOT_FOUND')}")
+                        logger.error(f"   Service zip codes: {elementor_payload.get('service_zip_codes', 'NOT_FOUND')}")
                     
-                    # Log the full elementor payload for debugging
-                    logger.error(f"   Full payload keys: {list(elementor_payload.keys())}")
+                        # Log the full elementor payload for debugging
+                        logger.error(f"   Full payload keys: {list(elementor_payload.keys())}")
                     
-                    # Continue processing even if vendor record fails - don't break the webhook
-                    pass
+                        # Continue processing even if vendor record fails - don't break the webhook
+                        pass
             
             # Trigger background tasks based on form type
             if form_config.get("requires_immediate_routing"):
