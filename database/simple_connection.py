@@ -34,7 +34,12 @@ class SimpleDatabase:
         self.init_database()
     
     def _get_conn(self):
+        """Return a SQLAlchemy Session (for session.execute(text(...)))."""
         return self.SessionLocal()
+
+    def _get_raw_conn(self):
+        """Return a raw DB-API connection (for .cursor(), .commit(), etc.)."""
+        return self.engine.raw_connection()
 
     def init_database(self):
         """Initialize database with enhanced schema"""
@@ -435,7 +440,7 @@ class SimpleDatabase:
         """Get vendor by email and account ID - FIXED to use correct column names"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # FIXED: Use service_categories instead of services_provided
@@ -466,7 +471,7 @@ class SimpleDatabase:
         """Update vendor status and optional GHL user ID"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             if ghl_user_id:
@@ -496,7 +501,7 @@ class SimpleDatabase:
         """Update vendor with GHL User ID - ENSURE this method exists"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -542,7 +547,7 @@ class SimpleDatabase:
         conn = None
         try:
             vendor_id = str(uuid.uuid4())
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # Validate required fields
@@ -598,7 +603,7 @@ class SimpleDatabase:
         conn = None
         try:
             lead_id_str = str(uuid.uuid4())
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO leads (id, account_id, vendor_id, ghl_contact_id, ghl_opportunity_id, service_category, 
@@ -647,7 +652,7 @@ class SimpleDatabase:
         conn = None
         try:
             lead_id = str(uuid.uuid4())
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # Calculate estimated value based on service complexity
@@ -810,7 +815,7 @@ class SimpleDatabase:
         """
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -877,7 +882,7 @@ class SimpleDatabase:
         """
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # Build dynamic query based on criteria
@@ -947,7 +952,7 @@ class SimpleDatabase:
         """Get statistics about leads for analytics"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             where_clause = "WHERE account_id = ?" if account_id else ""
@@ -1053,7 +1058,7 @@ class SimpleDatabase:
         """Update lead with GHL opportunity ID"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE leads 
@@ -1080,7 +1085,7 @@ class SimpleDatabase:
         """Assign a lead to a specific vendor"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE leads 
@@ -1107,7 +1112,7 @@ class SimpleDatabase:
         """Get a specific lead by its ID"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, account_id, vendor_id, ghl_contact_id, ghl_opportunity_id, 
@@ -1141,7 +1146,7 @@ class SimpleDatabase:
         """Get a specific lead by GHL contact ID - CRITICAL for bulk assignment workflow"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, account_id, vendor_id, ghl_contact_id, ghl_opportunity_id, 
@@ -1184,7 +1189,7 @@ class SimpleDatabase:
         """Remove vendor assignment from lead (for reassignment workflow)"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 UPDATE leads 
@@ -1210,7 +1215,7 @@ class SimpleDatabase:
     def update_vendor_availability(self, vendor_id: str, taking_new_work: bool) -> bool:
         """Update vendor taking_new_work status"""
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE vendors 
@@ -1230,7 +1235,7 @@ class SimpleDatabase:
         """Get vendor by GHL contact ID for webhook integration"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, account_id, name, company_name, email, phone, ghl_contact_id, 
@@ -1266,7 +1271,7 @@ class SimpleDatabase:
         """Get vendor by ID"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, account_id, name, company_name, email, phone, ghl_contact_id, 
@@ -1303,7 +1308,7 @@ class SimpleDatabase:
         """Get all leads for a specific GHL contact ID"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -1358,7 +1363,7 @@ class SimpleDatabase:
         """Update lead with arbitrary fields"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # First, add any missing columns
@@ -1409,7 +1414,7 @@ class SimpleDatabase:
         """Create a lead event for tracking history"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             # Create events table if it doesn't exist
@@ -1456,7 +1461,7 @@ class SimpleDatabase:
         """Get lead events with optional filtering"""
         conn = None
         try:
-            conn = self._get_conn()
+            conn = self._get_raw_conn()
             cursor = conn.cursor()
             
             query = 'SELECT id, lead_id, contact_id, event_type, event_data, created_at FROM lead_events WHERE 1=1'

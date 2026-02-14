@@ -565,8 +565,17 @@ class EnhancedDatabaseSync:
                 # Add other fields...
             }
             
-            # Create vendor in database
-            vendor_id = simple_db_instance.create_vendor(vendor_data)
+            # Create vendor in database (create_vendor expects positional/keyword args, not a dict)
+            vendor_id = simple_db_instance.create_vendor(
+                account_id=vendor_data['account_id'],
+                name=vendor_data['name'],
+                email=vendor_data['email'],
+                company_name=vendor_data.get('company_name', ''),
+                phone=vendor_data.get('phone', ''),
+                ghl_contact_id=vendor_data.get('ghl_contact_id'),
+                status=vendor_data.get('status', 'pending'),
+                taking_new_work=vendor_data.get('taking_new_work', True),
+            )
             if vendor_id:
                 self.stats['vendors_created'] += 1
                 logger.info(f"✅ Created NEW vendor from GHL: {vendor_data['name']}")
@@ -606,8 +615,8 @@ class EnhancedDatabaseSync:
             if not updates:
                 return True
             
-            # Build UPDATE query
-            conn = simple_db_instance._get_conn()
+            # Build UPDATE query (use raw connection for cursor)
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             set_clauses = []
