@@ -12,8 +12,9 @@ env/
 venv/
 .venv/
 
-# Ignore data directory
+# Ignore data directory (except form config which is versioned)
 data/**
+!data/form_config.json
 
 # Ignore database files
 *.db
