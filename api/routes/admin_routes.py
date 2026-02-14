@@ -148,8 +148,11 @@ async def generate_field_reference(body: Optional[GenerateFieldReferenceRequest]
             if status in (401, 403):
                 detail += (
                     " GHL rejected the request. Use valid credentials in the form above (same as Test connection) "
-                    "or set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in .env / docker-compose for this server."
+                    "or set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in .env / docker-compose for this server. "
                 )
+                # DEBUG: show server env values (remove later)
+                _tid = f"{token[:12]}...{token[-4:]}" if len(token) > 16 else ("(empty)" if not token else token[:8] + "...")
+                detail += f" [DEBUG - remove later] GHL_LOCATION_ID={location_id!r} GHL_PRIVATE_TOKEN={_tid!r}"
                 logger.warning("Generate field reference: GHL returned %s.", status)
             raise HTTPException(
                 status_code=401 if status in (401, 403) else 500,
@@ -220,17 +223,16 @@ async def generate_field_reference(body: Optional[GenerateFieldReferenceRequest]
             "generatedAt": field_reference["generated_at"]
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error generating field reference: {e}")
-        
-        # Log error
         simple_db_instance.log_activity(
             event_type="field_reference_generation_error",
             event_data={"error": str(e)},
             success=False,
             error_message=str(e)
         )
-        
         raise HTTPException(status_code=500, detail=f"Failed to generate field reference: {str(e)}")
 
 # Create Fields from CSV
