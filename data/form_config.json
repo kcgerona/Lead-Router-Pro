@@ -1,0 +1,10 @@
+{
+  "_comment": "Explicit form type configuration. Only forms listed in vendor_allowlist create vendor records. All other forms are treated as client leads. Add your vendor form webhook path (e.g. vendor-application) to vendor_allowlist. Use form_type_overrides to force a form to client_lead or general_inquiry if needed.",
+  "vendor_allowlist": [
+    "vendor-application",
+    "vendor_application",
+    "vendor_network",
+    "join_vendor_network"
+  ],
+  "form_type_overrides": {}
+}
