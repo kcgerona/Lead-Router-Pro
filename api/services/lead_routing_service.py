@@ -557,7 +557,7 @@ class LeadRoutingService:
             vendor_id: Vendor ID to update
         """
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE vendors 

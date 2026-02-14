@@ -194,7 +194,7 @@ async def get_reassignment_history(contact_id: str):
             )
         
         # Get activity history for reassignments
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -246,7 +246,7 @@ async def get_reassignment_status():
     Get reassignment system status and statistics.
     """
     try:
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         # Get reassignment statistics

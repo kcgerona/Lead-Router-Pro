@@ -322,7 +322,7 @@ class EnhancedDatabaseSync:
         
         try:
             # Get all leads from database
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -728,7 +728,7 @@ class EnhancedDatabaseSync:
             values.append(vendor_id)
             
             # Execute update
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             query = f"""
@@ -768,7 +768,7 @@ class EnhancedDatabaseSync:
             values.append(lead_id)
             
             # Execute update
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             query = f"""

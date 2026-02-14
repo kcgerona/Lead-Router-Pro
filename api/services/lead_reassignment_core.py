@@ -292,7 +292,7 @@ class LeadReassignmentCore:
                 lead_id = str(uuid.uuid4())
                 logger.info(f"➕ Creating new lead with opportunity_id")
                 
-                conn = simple_db_instance._get_conn()
+                conn = simple_db_instance._get_raw_conn()
                 cursor = conn.cursor()
                 
                 try:
@@ -396,7 +396,7 @@ class LeadReassignmentCore:
             
             # IMPORTANT: If we need to preserve source, update it back
             if preserve_source and original_source:
-                conn = simple_db_instance._get_conn()
+                conn = simple_db_instance._get_raw_conn()
                 cursor = conn.cursor()
                 try:
                     cursor.execute(

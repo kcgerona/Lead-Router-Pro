@@ -125,7 +125,7 @@ async def create_lead_from_ghl_contact(
         # Database INSERT using correct schema
         conn = None
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -1944,7 +1944,7 @@ async def trigger_clean_lead_routing_workflow(
         lead_id = None  # Initialize lead_id to prevent UnboundLocalError
         try:
             lead_id = str(uuid.uuid4())  # Set lead_id early so it can be used
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             # Get service values from mapped payload (mapped from GHL custom fields)
@@ -2779,7 +2779,7 @@ async def handle_lead_reassignment_webhook(request: Request):
             conn = None
             try:
                 lead_id_str = str(uuid.uuid4())
-                conn = simple_db_instance._get_conn()
+                conn = simple_db_instance._get_raw_conn()
                 cursor = conn.cursor()
                 
                 # INSERT using CORRECT Leads table schema field names
@@ -3304,7 +3304,7 @@ async def handle_ghl_new_contact_trigger(request: Request):
         
         conn = None
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''

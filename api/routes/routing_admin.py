@@ -143,7 +143,7 @@ async def update_vendor_coverage(vendor_id: str, coverage_data: Dict[str, Any]):
             raise HTTPException(status_code=400, detail="Invalid coverage type")
         
         # Update vendor in database
-        conn = db._get_conn()
+        conn = db._get_raw_conn()
         cursor = conn.cursor()
         
         cursor.execute("""

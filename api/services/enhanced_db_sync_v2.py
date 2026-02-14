@@ -181,7 +181,7 @@ class EnhancedDatabaseSync:
         
         try:
             # First, get all local vendor GHL contact IDs and emails
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT ghl_contact_id, email, name 
@@ -662,7 +662,7 @@ class EnhancedDatabaseSync:
         
         try:
             # Get all local lead identifiers for matching
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT DISTINCT ghl_contact_id, customer_email, ghl_opportunity_id, id
@@ -805,7 +805,7 @@ class EnhancedDatabaseSync:
             if unmatched_local_ids:
                 logger.warning(f"⚠️ {len(unmatched_local_ids)} local leads not found in GHL")
                 # Get details of first 5 unmatched leads for debugging
-                conn = simple_db_instance._get_conn()
+                conn = simple_db_instance._get_raw_conn()
                 cursor = conn.cursor()
                 for lead_id in list(unmatched_local_ids)[:5]:
                     cursor.execute("SELECT customer_email, ghl_contact_id FROM leads WHERE id = ?", (lead_id,))
@@ -830,7 +830,7 @@ class EnhancedDatabaseSync:
         local_leads_by_email = {}
         
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -1055,7 +1055,7 @@ class EnhancedDatabaseSync:
                     lead_data['service_state'] = location_data.get('state', '')
             
             # Insert into database
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             columns = list(lead_data.keys())
@@ -1083,7 +1083,7 @@ class EnhancedDatabaseSync:
             if not updates:
                 return True
             
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             set_clauses = []

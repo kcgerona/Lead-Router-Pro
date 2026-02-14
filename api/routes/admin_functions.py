@@ -281,41 +281,37 @@ async def _sync_vendor_using_widget_logic(contact: Dict[str, Any], account_id: s
             # Update the vendor using direct SQL since we don't have update_vendor method
             vendor_id = existing_vendor['id']
             try:
-                import sqlite3
-                conn = sqlite3.connect('smart_lead_router.db')
-                cursor = conn.cursor()
-                
-                # Update vendor with synced data from GHL
-                cursor.execute("""
-                    UPDATE vendors SET 
-                        name = ?, 
-                        company_name = ?,
-                        phone = ?,
-                        service_categories = ?,
-                        services_offered = ?,
-                        coverage_type = ?,
-                        coverage_states = ?,
-                        coverage_counties = ?,
-                        updated_at = datetime('now')
-                    WHERE id = ?
-                """, (
-                    vendor_name,
-                    vendor_company_name or '',
-                    vendor_phone,
-                    service_categories_json,
-                    services_offered_json,
-                    coverage_type,
-                    coverage_states_json,
-                    coverage_counties_json,
-                    vendor_id
-                ))
-                
-                conn.commit()
-                conn.close()
-                
-                logger.info(f"✅ Updated vendor {vendor_email} with service_categories: {service_categories_json}")
-                return "updated"
-                
+                conn = simple_db_instance._get_raw_conn()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE vendors SET 
+                            name = ?, 
+                            company_name = ?,
+                            phone = ?,
+                            service_categories = ?,
+                            services_offered = ?,
+                            coverage_type = ?,
+                            coverage_states = ?,
+                            coverage_counties = ?,
+                            updated_at = datetime('now')
+                        WHERE id = ?
+                    """, (
+                        vendor_name,
+                        vendor_company_name or '',
+                        vendor_phone,
+                        service_categories_json,
+                        services_offered_json,
+                        coverage_type,
+                        coverage_states_json,
+                        coverage_counties_json,
+                        vendor_id
+                    ))
+                    conn.commit()
+                    logger.info(f"✅ Updated vendor {vendor_email} with service_categories: {service_categories_json}")
+                    return "updated"
+                finally:
+                    conn.close()
             except Exception as e:
                 logger.error(f"❌ Error updating vendor {vendor_email}: {e}")
                 return "error"
