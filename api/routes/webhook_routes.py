@@ -3329,42 +3329,61 @@ async def handle_ghl_new_contact_trigger(request: Request):
             conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
-            cursor.execute('''
-                INSERT INTO leads (
-                    id, account_id, ghl_contact_id, ghl_opportunity_id, customer_name,
-                    customer_email, customer_phone, primary_service_category, specific_service_requested,
-                    customer_zip_code, service_zip_code, service_county, service_state, vendor_id, 
-                    status, priority, source, service_details, 
-                    created_at, updated_at, service_city, 
-                    service_complexity, estimated_duration, requires_emergency_response, 
-                    classification_confidence, classification_reasoning
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
-            ''', (
-                lead_id,                                                    # id
-                account_id,                                                 # account_id
-                contact_id,                                                 # ghl_contact_id
-                None,                                                       # ghl_opportunity_id (will be updated)
-                customer_name,                                              # customer_name
-                customer_email.lower().strip() if customer_email else None, # customer_email
-                customer_phone,                                             # customer_phone
-                service_category,                                           # primary_service_category
-                final_specific_service or "",                               # specific_service_requested (properly extracted)
-                zip_code,                                                   # customer_zip_code
-                zip_code,                                                   # service_zip_code
-                service_county,                                             # service_county
-                service_state,                                              # service_state
-                None,                                                       # vendor_id (unassigned)
-                "new",                                                      # status
-                "normal",                                                   # priority
-                "ghl_automation",                                           # source
-                json.dumps(service_details),                                # service_details
-                "",                                                         # service_city
-                "simple",                                                   # service_complexity
-                "medium",                                                   # estimated_duration
-                False,                                                      # requires_emergency_response
-                1.0,                                                        # classification_confidence
-                "Created via GHL new contact trigger"                       # classification_reasoning
-            ))
+            try:
+                cursor.execute('''
+                    INSERT INTO leads (
+                        id, account_id, ghl_contact_id, ghl_opportunity_id, customer_name,
+                        customer_email, customer_phone, primary_service_category, specific_service_requested,
+                        customer_zip_code, service_zip_code, service_county, service_state, vendor_id, 
+                        status, priority, source, service_details, 
+                        created_at, updated_at, service_city, 
+                        service_complexity, estimated_duration, requires_emergency_response, 
+                        classification_confidence, classification_reasoning
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    lead_id,                                                    # id
+                    account_id,                                                 # account_id
+                    contact_id,                                                 # ghl_contact_id
+                    None,                                                       # ghl_opportunity_id (will be updated)
+                    customer_name,                                              # customer_name
+                    customer_email.lower().strip() if customer_email else None, # customer_email
+                    customer_phone,                                             # customer_phone
+                    service_category,                                           # primary_service_category
+                    final_specific_service or "",                               # specific_service_requested (properly extracted)
+                    zip_code,                                                   # customer_zip_code
+                    zip_code,                                                   # service_zip_code
+                    service_county,                                             # service_county
+                    service_state,                                              # service_state
+                    None,                                                       # vendor_id (unassigned)
+                    "new",                                                      # status
+                    "normal",                                                   # priority
+                    "ghl_automation",                                           # source
+                    json.dumps(service_details),                                # service_details
+                    "",                                                         # service_city
+                    "simple",                                                   # service_complexity
+                    "medium",                                                   # estimated_duration
+                    False,                                                      # requires_emergency_response
+                    1.0,                                                        # classification_confidence
+                    "Created via GHL new contact trigger"                       # classification_reasoning
+                ))
+            except Exception as col_err:
+                err_msg = str(col_err).lower()
+                if "no such column" in err_msg or "unknown column" in err_msg:
+                    logger.warning(f"⚠️ Extended lead columns missing, using base schema: {col_err}")
+                    cursor.execute('''
+                        INSERT INTO leads (
+                            id, account_id, vendor_id, ghl_contact_id, ghl_opportunity_id, service_category,
+                            customer_name, customer_email, customer_phone, service_details, priority, source, status,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ''', (
+                        lead_id, account_id, None, contact_id, None, service_category,
+                        customer_name or "", customer_email.lower().strip() if customer_email else None, customer_phone or "",
+                        json.dumps({**service_details, "specific_service_requested": final_specific_service or "", "customer_zip_code": zip_code, "service_county": service_county, "service_state": service_state}),
+                        "normal", "ghl_automation", "new"
+                    ))
+                else:
+                    raise
             
             conn.commit()
             logger.info(f"✅ Created lead: {lead_id}")

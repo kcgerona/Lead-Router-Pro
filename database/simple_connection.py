@@ -111,9 +111,33 @@ class SimpleDatabase:
                 )
             '''))
             
-            # Check if enhanced columns exist and add them if needed
-            # This is more complex with SQLAlchemy and different DBs, so we'll skip for now
-            # and assume the table is created correctly.
+            # Ensure extended lead columns exist (for webhook and admin queries)
+            for col, col_type in [
+                ("primary_service_category", "TEXT"),
+                ("specific_service_requested", "TEXT"),
+                ("customer_zip_code", "TEXT"),
+                ("service_zip_code", "TEXT"),
+                ("service_county", "TEXT"),
+                ("service_state", "TEXT"),
+                ("service_city", "TEXT"),
+                ("service_complexity", "TEXT"),
+                ("estimated_duration", "TEXT"),
+                ("requires_emergency_response", "INTEGER"),
+                ("classification_confidence", "REAL"),
+                ("classification_reasoning", "TEXT"),
+                ("assigned_at", "TIMESTAMP"),
+                ("specific_services", "TEXT"),
+            ]:
+                try:
+                    session.execute(text(f"ALTER TABLE leads ADD COLUMN {col} {col_type}"))
+                    session.commit()
+                    logger.info(f"✅ Added column leads.{col}")
+                except Exception as e:
+                    if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
+                        pass
+                    else:
+                        logger.warning(f"⚠️ Could not add leads.{col}: {e}")
+                    session.rollback()
             
             # Create activity log table
             session.execute(text('''
