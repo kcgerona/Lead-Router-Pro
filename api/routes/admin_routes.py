@@ -84,17 +84,24 @@ def get_ghl_custom_fields(private_token: str, location_id: str) -> Dict:
             "Content-Type": "application/json",
             "Version": "2021-07-28"
         }
-        
         response = requests.get(url, headers=headers)
-        
         if response.status_code == 200:
             data = response.json()
             return {"success": True, "fields": data.get('customFields', [])}
-        else:
-            return {"success": False, "error": f"API returned {response.status_code}"}
-            
+        error_msg = f"API returned {response.status_code}"
+        try:
+            body = response.text[:200] if response.text else ""
+            if body and "unauthorized" not in body.lower():
+                error_msg += f": {body}"
+        except Exception:
+            pass
+        return {
+            "success": False,
+            "error": error_msg,
+            "status_code": response.status_code,
+        }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "status_code": None}
 
 # Test GHL API Connection
 @router.post("/test-ghl-connection")
@@ -118,9 +125,20 @@ async def generate_field_reference():
     try:
         # Get all custom fields
         fields_result = get_ghl_custom_fields(DSP_LOCATION_PIT, DSP_GHL_LOCATION_ID)
-        
         if not fields_result["success"]:
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve custom fields: {fields_result['error']}")
+            status = fields_result.get("status_code")
+            detail = f"Failed to retrieve custom fields: {fields_result['error']}"
+            if status in (401, 403):
+                detail += (
+                    " GHL rejected the request. Generate Field Reference uses server env vars "
+                    "(GHL_PRIVATE_TOKEN, GHL_LOCATION_ID). Ensure they match valid credentials and "
+                    "are set in .env / docker-compose for this server."
+                )
+                logger.warning("Generate field reference: GHL returned %s. Check server GHL env vars.", status)
+            raise HTTPException(
+                status_code=401 if status in (401, 403) else 500,
+                detail=detail,
+            )
         
         custom_fields = fields_result["fields"]
         
