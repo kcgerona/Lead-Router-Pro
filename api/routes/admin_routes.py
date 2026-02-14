@@ -21,16 +21,18 @@ from database.simple_connection import db as simple_db_instance
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Dashboard"])
 
-# Configuration - Import your config (no hardcoded fallback; use .env only)
+# Configuration - Use AppConfig so .env / docker-compose env vars are read
 try:
-    from config import Config
-    DSP_GHL_LOCATION_ID = Config.GHL_LOCATION_ID or ""
-    DSP_LOCATION_PIT = Config.GHL_PRIVATE_TOKEN or ""
-    DSP_AGENCY_API_KEY = getattr(Config, 'GHL_AGENCY_API_KEY', None)
+    from config import AppConfig
+    DSP_GHL_LOCATION_ID = AppConfig.GHL_LOCATION_ID or ""
+    DSP_LOCATION_PIT = AppConfig.GHL_PRIVATE_TOKEN or ""
+    DSP_AGENCY_API_KEY = getattr(AppConfig, 'GHL_AGENCY_API_KEY', None)
+    DSP_FIELD_REFERENCE_PATH = getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
 except ImportError:
     DSP_GHL_LOCATION_ID = ""
     DSP_LOCATION_PIT = ""
     DSP_AGENCY_API_KEY = None
+    DSP_FIELD_REFERENCE_PATH = "data/field_reference.json"
 
 # Pydantic models for request validation
 class GHLConnectionTest(BaseModel):
@@ -138,7 +140,10 @@ async def generate_field_reference(body: Optional[GenerateFieldReferenceRequest]
             if not token or not location_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="No credentials provided. Set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in request body or in server .env.",
+                    detail=(
+                        "No credentials provided. Either (1) fill in Location ID and Private Integration Token in the form above and click Generate, "
+                        "or (2) set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in the .env file next to docker-compose.yml on the server — docker-compose passes them into the container. Restart the api container after changing .env."
+                    ),
                 )
         fields_result = get_ghl_custom_fields(token, location_id)
         if not fields_result["success"]:
@@ -195,11 +200,15 @@ async def generate_field_reference(body: Optional[GenerateFieldReferenceRequest]
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        # Save to file
-        with open("field_reference.json", "w") as f:
+        # Save to app data path (data/field_reference.json) to avoid permission errors
+        field_ref_path = DSP_FIELD_REFERENCE_PATH
+        ref_dir = os.path.dirname(field_ref_path)
+        if ref_dir:
+            os.makedirs(ref_dir, exist_ok=True)
+        with open(field_ref_path, "w") as f:
             json.dump(field_reference, f, indent=2)
         
-        logger.info(f"Generated field_reference.json with {len(all_ghl_fields)} fields")
+        logger.info(f"Generated {field_ref_path} with {len(all_ghl_fields)} fields")
         
         # Log to database
         simple_db_instance.log_activity(

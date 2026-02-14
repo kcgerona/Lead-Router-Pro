@@ -9,14 +9,24 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
+
+def _field_reference_path() -> str:
+    """Path to field_reference.json under app data (data/) to avoid permission errors."""
+    try:
+        from config import AppConfig
+        return getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
+    except ImportError:
+        return "data/field_reference.json"
+
+
 class FieldReferenceService:
     """
     Dedicated service for managing GoHighLevel field reference data
     Provides efficient field lookup, similarity matching, and context slicing
     """
     
-    def __init__(self, reference_file: str = "field_reference.json"):
-        self.reference_file = Path(reference_file)
+    def __init__(self, reference_file: Optional[str] = None):
+        self.reference_file = Path(reference_file or _field_reference_path())
         self.field_reference = {}
         self._field_name_index = {}
         self._load_field_reference()

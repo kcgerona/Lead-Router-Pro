@@ -2937,11 +2937,12 @@ async def clean_webhook_health_check():
         db_stats = {"error": str(e)}
         db_healthy = False
     
-    # Test field reference loading directly from field_reference.json
+    # Test field reference loading from app data path (data/field_reference.json)
     try:
         import json
         from pathlib import Path
-        field_ref_path = Path("field_reference.json")
+        _ref_path = getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
+        field_ref_path = Path(_ref_path)
         if field_ref_path.exists():
             with open(field_ref_path, 'r') as f:
                 field_reference = json.load(f)
@@ -3017,11 +3018,12 @@ async def get_clean_service_categories():
 async def get_clean_field_mappings():
     """Return all available field mappings for form development - Direct only"""
     
-    # Load field reference directly from field_reference.json
+    # Load field reference from app data path (data/field_reference.json)
     try:
         import json
         from pathlib import Path
-        field_ref_path = Path("field_reference.json")
+        _ref_path = getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
+        field_ref_path = Path(_ref_path)
         if field_ref_path.exists():
             with open(field_ref_path, 'r') as f:
                 field_reference = json.load(f)
@@ -3031,7 +3033,7 @@ async def get_clean_field_mappings():
         logger.error(f"Error loading field reference for mappings: {e}")
         field_reference = {}
     
-    # Build custom field mappings from field_reference.json
+    # Build custom field mappings from field_reference
     # The file has field IDs as keys directly
     custom_field_mappings = {}
     for field_id, field_info in field_reference.items():

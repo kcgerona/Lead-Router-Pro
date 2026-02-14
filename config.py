@@ -55,6 +55,9 @@ class AppConfig:
     # Database Configuration
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./smart_lead_router.db")
     
+    # App data directory (writable; avoid writing to repo root)
+    FIELD_REFERENCE_PATH: str = os.getenv("FIELD_REFERENCE_PATH", "data/field_reference.json")
+    
     @classmethod
     def validate_config(cls) -> bool:
         """

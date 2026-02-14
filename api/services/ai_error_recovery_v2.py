@@ -66,8 +66,9 @@ class FieldReferenceService:
         self._load_field_reference()
     
     def _load_field_reference(self):
-        """Load field reference once at startup"""
-        reference_file = Path("field_reference.json")
+        """Load field reference once at startup (app data path to avoid permission errors)."""
+        ref_path = getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
+        reference_file = Path(ref_path)
         
         try:
             if reference_file.exists():

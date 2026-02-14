@@ -8,6 +8,15 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+def _default_field_reference_path() -> str:
+    """Path to field_reference.json under app data (data/) to avoid permission errors."""
+    try:
+        from config import AppConfig
+        return getattr(AppConfig, "FIELD_REFERENCE_PATH", "data/field_reference.json")
+    except ImportError:
+        return "data/field_reference.json"
+
+
 class FieldMapper:
     """
     Enhanced field mapping service that integrates with both field_mappings.json and field_reference.json
@@ -19,9 +28,9 @@ class FieldMapper:
     - Integration with webhook_routes, admin_routes, field_mapping_routes, and dashboard
     """
     
-    def __init__(self, mappings_file: str = "field_mappings.json", reference_file: str = "field_reference.json"):
+    def __init__(self, mappings_file: str = "field_mappings.json", reference_file: Optional[str] = None):
         self._mappings_file = Path(mappings_file)
-        self._reference_file = Path(reference_file)
+        self._reference_file = Path(reference_file or _default_field_reference_path())
         self._mappings = {}
         self._field_reference = {}
         self._ghl_field_mapping = {}  # Maps GHL field keys to their details (ID, name, etc.)

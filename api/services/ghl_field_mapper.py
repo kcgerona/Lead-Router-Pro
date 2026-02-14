@@ -7,6 +7,7 @@ Replaces the old field_mapper module with proper support for GHL's nested custom
 
 import json
 import logging
+import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -21,9 +22,10 @@ class GHLFieldMapper:
         self.field_lookup = self._build_lookup_tables()
         
     def _load_field_reference(self) -> Dict:
-        """Load the field reference from JSON file"""
+        """Load the field reference from JSON file (app data path to avoid permission errors)."""
         try:
-            field_ref_path = Path("field_reference.json")
+            _path = os.getenv("FIELD_REFERENCE_PATH", "data/field_reference.json")
+            field_ref_path = Path(_path)
             if field_ref_path.exists():
                 with open(field_ref_path, 'r') as f:
                     data = json.load(f)
