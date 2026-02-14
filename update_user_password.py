@@ -18,7 +18,7 @@ def update_user_password(email: str, new_password: str, domain: str = "dockside.
     auth_service = AuthService()
     
     # Get database session
-    db = next(get_db_session())
+    db = get_db_session()
     
     try:
         # Get tenant

@@ -4,7 +4,7 @@ services:
     container_name: dsp-api
     build: . 
     ports:
-      - "8001:8000"
+      - "${PORT}:8000"
     environment:
       - DATABASE_URL=sqlite:///./data/smart_lead_router.db
       - REDIS_URL=redis://redis:6379
@@ -13,6 +13,13 @@ services:
       - ENVIRONMENT=production
       - TENANT_DOMAIN=${DEFAULT_TENANT_DOMAIN}
       - TENANT_NOTIFICATION_EMAIL=${TENANT_NOTIFICATION_EMAIL}
+      # SMTP Configuration for 2FA emails
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-noreply@dockside.life}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-Dockside Pro Security}
     depends_on:
       - redis
     volumes:
@@ -71,7 +78,19 @@ services:
       done
       "
     restart: unless-stopped
-    
+  
+  sqlite-web:
+    container_name: dsp-sqlite-web
+    image: coleifer/sqlite-web
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - sqlite_data:/data
+    command: sqlite_web --host 0.0.0.0 /data/smart_lead_router.db
+    networks:
+      - app-network
+      
 networks: 
   app-network: 
     driver: bridge

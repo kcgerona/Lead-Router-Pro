@@ -530,7 +530,6 @@ class GoHighLevelAPI:
                 "type": "account",
                 "role": "user",  # User role instead of admin for vendors
                 "locationIds": [self.location_id],
-                "sendInvite": False,  # DISABLED: Don't auto-send invite to avoid agency branding during onboarding
                 "permissions": {
                     # VENDOR ESSENTIALS - ENABLED
                     "contactsEnabled": True,           # View/manage assigned contacts
@@ -713,7 +712,6 @@ class GoHighLevelAPI:
                 "type": user_data.get("type", "account"),  # V1 API: account, agency
                 "role": user_data.get("role", "user"),     # V1 API: admin, user
                 "locationIds": [self.location_id],         # CORRECTED: Must be array with location ID
-                "sendInvite": False,  # DISABLED: Don't auto-send invite to avoid agency branding during onboarding
                 "permissions": user_data.get("permissions", {
                     "campaignsEnabled": False,
                     "campaignsReadOnly": True,
