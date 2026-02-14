@@ -4,7 +4,7 @@ services:
     container_name: dsp-api
     build: . 
     ports:
-      - "${PORT}:8000"
+      - "8004:8000"
     environment:
       - DATABASE_URL=sqlite:///./data/smart_lead_router.db
       - REDIS_URL=redis://redis:6379
@@ -13,6 +13,14 @@ services:
       - ENVIRONMENT=production
       - TENANT_DOMAIN=${DEFAULT_TENANT_DOMAIN}
       - TENANT_NOTIFICATION_EMAIL=${TENANT_NOTIFICATION_EMAIL}
+      # GHL API (used by Generate Field Reference, webhooks, etc.)
+      - GHL_PRIVATE_TOKEN=${GHL_PRIVATE_TOKEN}
+      - GHL_LOCATION_ID=${GHL_LOCATION_ID}
+      - GHL_LOCATION_API=${GHL_LOCATION_API}
+      - GHL_AGENCY_API_KEY=${GHL_AGENCY_API_KEY}
+      - GHL_COMPANY_ID=${GHL_COMPANY_ID}
+      - GHL_WEBHOOK_API_KEY=${GHL_WEBHOOK_API_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
       # SMTP Configuration for 2FA emails
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}

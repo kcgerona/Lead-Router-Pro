@@ -391,16 +391,17 @@ class EnhancedDatabaseSync:
             if field_id:
                 custom_fields[field_id] = field_value
         
-        # Check for GHL User ID and activate vendor if found
+        # Check for GHL User ID and set if found
         ghl_user_id_from_contact = custom_fields.get('HXVNT4y8OynNokWAfO2D', '').strip()
-        if ghl_user_id_from_contact:
-            if not vendor.get('ghl_user_id'):
-                updates['ghl_user_id'] = ghl_user_id_from_contact
-                logger.info(f"   ✅ Found GHL User ID: {ghl_user_id_from_contact}")
-            
-            if vendor.get('status') != 'active':
-                updates['status'] = 'active'
-                logger.info(f"   ✅ Activating vendor - GHL User ID present")
+        if ghl_user_id_from_contact and not vendor.get('ghl_user_id'):
+            updates['ghl_user_id'] = ghl_user_id_from_contact
+            logger.info(f"   ✅ Found GHL User ID: {ghl_user_id_from_contact}")
+
+        # Status from tags: "manually approved" -> active, else -> pending
+        tag_based_status = self._get_vendor_status_from_tags(ghl_contact)
+        if vendor.get('status') != tag_based_status:
+            updates['status'] = tag_based_status
+            logger.info(f"   ✅ Setting vendor status to {tag_based_status} (from tags)")
         
         # Process service_zip_codes to derive coverage fields
         service_zip_codes_value = custom_fields.get('yDcN0FmwI3xacyxAuTWs', '').strip()
@@ -498,6 +499,26 @@ class EnhancedDatabaseSync:
         
         return {'type': None, 'states': None, 'counties': None}
     
+    def _get_vendor_status_from_tags(self, ghl_contact: Dict) -> str:
+        """Determine vendor status from GHL contact tags: 'manually approved' -> active, else -> pending"""
+        tags_raw = ghl_contact.get('tags') or []
+        if isinstance(tags_raw, str):
+            tags_list = [t.strip().lower() for t in tags_raw.split(',') if t.strip()]
+        elif isinstance(tags_raw, list):
+            tags_list = []
+            for t in tags_raw:
+                if isinstance(t, str):
+                    tags_list.append(t.strip().lower())
+                elif isinstance(t, dict):
+                    tag_name = (t.get('name') or t.get('tag') or '').strip().lower()
+                    if tag_name:
+                        tags_list.append(tag_name)
+                else:
+                    tags_list.append(str(t).strip().lower())
+        else:
+            tags_list = []
+        return "active" if "manually approved" in tags_list else "pending"
+
     def _values_differ(self, current: Any, new: Any, field_name: str) -> bool:
         """Check if two values are different"""
         if current is None and new == '':
@@ -530,7 +551,8 @@ class EnhancedDatabaseSync:
                 logger.error("❌ No account found for location")
                 return
             
-            # Create vendor data
+            # Create vendor data - status from tags: "manually approved" -> active, else -> pending
+            tag_based_status = self._get_vendor_status_from_tags(ghl_contact)
             vendor_data = {
                 'account_id': account['id'],
                 'ghl_contact_id': ghl_contact.get('id'),
@@ -539,7 +561,7 @@ class EnhancedDatabaseSync:
                 'email': ghl_contact.get('email', ''),
                 'phone': ghl_contact.get('phone', ''),
                 'company_name': custom_fields.get('JexVrg2VNhnwIX7YlyJV', ''),
-                'status': 'active' if custom_fields.get('HXVNT4y8OynNokWAfO2D') else 'pending',
+                'status': tag_based_status,
                 # Add other fields...
             }
             
