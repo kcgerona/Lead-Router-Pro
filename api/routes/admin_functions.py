@@ -620,7 +620,7 @@ async def bulk_vendor_action(request: Dict[str, Any]):
             # Fetch vendors by filter
             status_filter = filter_criteria.get("status")
             if status_filter:
-                conn = simple_db_instance._get_conn()
+                conn = simple_db_instance._get_raw_conn()
                 cursor = conn.cursor()
                 cursor.execute("SELECT id FROM vendors WHERE status = ?", (status_filter,))
                 vendor_ids = [row[0] for row in cursor.fetchall()]
@@ -638,7 +638,7 @@ async def bulk_vendor_action(request: Dict[str, Any]):
         processed = 0
         errors = []
         
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         try:
@@ -708,7 +708,7 @@ async def get_missing_vendors():
     These vendors need admin review.
     """
     try:
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -821,7 +821,7 @@ async def delete_vendor(vendor_id: str):
     Permanently delete a single vendor from the database
     """
     try:
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         # Check if vendor exists
@@ -859,7 +859,7 @@ async def bulk_delete_vendors(request: BulkDeleteRequest):
         if not request.ids:
             raise HTTPException(status_code=400, detail="No vendor IDs provided")
         
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         deleted_count = 0
@@ -958,7 +958,7 @@ async def delete_lead(lead_id: str):
     Permanently delete a single lead from the database
     """
     try:
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         # Check if lead exists
@@ -996,7 +996,7 @@ async def bulk_delete_leads(request: BulkDeleteRequest):
         if not request.ids:
             raise HTTPException(status_code=400, detail="No lead IDs provided")
         
-        conn = simple_db_instance._get_conn()
+        conn = simple_db_instance._get_raw_conn()
         cursor = conn.cursor()
         
         deleted_count = 0
