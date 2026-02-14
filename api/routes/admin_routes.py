@@ -21,16 +21,15 @@ from database.simple_connection import db as simple_db_instance
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Dashboard"])
 
-# Configuration - Import your config
+# Configuration - Import your config (no hardcoded fallback; use .env only)
 try:
     from config import Config
-    DSP_GHL_LOCATION_ID = Config.GHL_LOCATION_ID
-    DSP_LOCATION_PIT = Config.GHL_PRIVATE_TOKEN
+    DSP_GHL_LOCATION_ID = Config.GHL_LOCATION_ID or ""
+    DSP_LOCATION_PIT = Config.GHL_PRIVATE_TOKEN or ""
     DSP_AGENCY_API_KEY = getattr(Config, 'GHL_AGENCY_API_KEY', None)
 except ImportError:
-    # Fallback if config doesn't exist
-    DSP_GHL_LOCATION_ID = "ilmrtA1Vk6rvcy4BswKg"
-    DSP_LOCATION_PIT = "pit-c361d89c-d943-4812-9839-8e3223c2f31a"
+    DSP_GHL_LOCATION_ID = ""
+    DSP_LOCATION_PIT = ""
     DSP_AGENCY_API_KEY = None
 
 # Pydantic models for request validation
