@@ -260,7 +260,7 @@ async def create_lead_from_ghl_contact(
         # Database INSERT using correct schema
         conn = None
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
@@ -2386,7 +2386,7 @@ async def trigger_clean_lead_routing_workflow(
         lead_id = None
         try:
             lead_id = str(uuid.uuid4())
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             # FIXED: INSERT using actual database schema field names (26 fields)
@@ -3326,7 +3326,7 @@ async def handle_ghl_new_contact_trigger(request: Request):
         
         conn = None
         try:
-            conn = simple_db_instance._get_conn()
+            conn = simple_db_instance._get_raw_conn()
             cursor = conn.cursor()
             
             cursor.execute('''
