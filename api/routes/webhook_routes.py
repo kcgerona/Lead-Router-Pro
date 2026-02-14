@@ -2664,6 +2664,12 @@ async def handle_vendor_user_creation_webhook(request: Request):
         vendor_phone = ghl_payload.get("phone", "")
         vendor_company_name = ghl_payload.get("Vendor Company Name", "") or ghl_payload.get("vendor_company_name", "")
         
+        # Determine vendor status from tags: "manually approved" -> active, else -> pending
+        tags_raw = ghl_payload.get("tags", "") or ""
+        tags_list = [t.strip().lower() for t in tags_raw.split(",")] if isinstance(tags_raw, str) else [str(t).lower() for t in tags_raw]
+        vendor_status = "active" if "manually approved" in tags_list else "pending"
+        logger.info(f"   🏷️ Tags: {tags_raw} -> vendor status: {vendor_status}")
+        
         logger.info(f"📋 Using vendor data directly from webhook payload:")
         logger.info(f"   👤 Contact ID: {contact_id}")
         logger.info(f"   📧 Email: {vendor_email}")
@@ -2697,7 +2703,7 @@ async def handle_vendor_user_creation_webhook(request: Request):
                 if vendor_record:
                     simple_db_instance.update_vendor_status(
                         vendor_record["id"], 
-                        "active", 
+                        vendor_status, 
                         existing_user.get("id")
                     )
             
@@ -2804,9 +2810,9 @@ async def handle_vendor_user_creation_webhook(request: Request):
             existing_vendor = simple_db_instance.get_vendor_by_email_and_account(vendor_email, account_record['id'])
             
             if existing_vendor:
-                # Update existing vendor with GHL User ID AND set status to active
-                simple_db_instance.update_vendor_status(existing_vendor['id'], 'active', user_id)
-                logger.info(f"✅ Updated existing vendor {existing_vendor['id']} with GHL User ID: {user_id} and set status to active")
+                # Update existing vendor with GHL User ID and status based on tags (manually approved -> active, else pending)
+                simple_db_instance.update_vendor_status(existing_vendor['id'], vendor_status, user_id)
+                logger.info(f"✅ Updated existing vendor {existing_vendor['id']} with GHL User ID: {user_id} and set status to {vendor_status}")
             else:
                 # CRITICAL ERROR: Vendor approval webhook called but no vendor record exists
                 # This should not happen - vendors must be created via form submission first
@@ -2866,8 +2872,8 @@ async def handle_vendor_user_creation_webhook(request: Request):
         # Update vendor record in database
         vendor_record = simple_db_instance.get_vendor_by_email_and_account(vendor_email, account_id)
         if vendor_record:
-            simple_db_instance.update_vendor_status(vendor_record["id"], "active", user_id)
-            logger.info(f"✅ Updated vendor record with user ID: {user_id}")
+            simple_db_instance.update_vendor_status(vendor_record["id"], vendor_status, user_id)
+            logger.info(f"✅ Updated vendor record with user ID: {user_id} and status: {vendor_status}")
         else:
             logger.warning(f"⚠️ No vendor record found for {vendor_email} - user created but not linked")
         
