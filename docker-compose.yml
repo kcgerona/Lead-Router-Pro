@@ -4,7 +4,7 @@ services:
     container_name: dsp-api
     build: . 
     ports:
-      - "8004:8000"
+      - "8000:8000"
     environment:
       - DATABASE_URL=sqlite:///./data/smart_lead_router.db
       - REDIS_URL=redis://redis:6379
@@ -30,9 +30,10 @@ services:
       - SMTP_FROM_NAME=${SMTP_FROM_NAME:-Dockside Pro Security}
     depends_on:
       - redis
+    user: "0:0"  # run as root so app can write to sqlite_data volume (volume is root-owned)
     volumes:
       - .:/app
-      - sqlite_data:/app/data
+      #- sqlite_data:/app/data
     networks: 
       - app-network
     command: ["uvicorn", "main_working_final:app", "--host", "0.0.0.0", "--port", "8000"]

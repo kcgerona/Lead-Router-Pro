@@ -681,8 +681,11 @@ Create Fields from CSV
         let currentTab = 'routing';
         const baseURL = window.location.origin;
 
+        const API_CONFIG_STORAGE_KEY = 'lead_router_ghl_config';
+
         // Initialize dashboard
         document.addEventListener('DOMContentLoaded', async function() {
+            loadAPIConfig();
             checkSystemStatus();
             loadDashboardStats();
             loadRoutingConfiguration();
@@ -1239,16 +1242,23 @@ ${data.data.leads.map((lead, index) =>
         async function generateFieldReference() {
             showResult('fieldOperationResult', 'info', 'Generating field reference...');
             try {
-                const response = await fetch(`${baseURL}/api/v1/admin/generate-field-reference`, { method: 'POST' });
+                const locationId = document.getElementById('locationId').value?.trim();
+                const privateToken = document.getElementById('privateToken').value?.trim();
+                const body = (locationId && privateToken) ? { locationId, privateToken } : {};
+                const response = await fetch(`${baseURL}/api/v1/admin/generate-field-reference`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
                 const data = await response.json();
                 if (data.success) {
                     showResult('fieldOperationResult', 'success', `Successfully generated field_reference.json with ${data.fieldCount} fields.`);
                     loadCurrentFields();
                 } else {
-                    showResult('fieldOperationResult', 'error', 'Failed to generate field reference: ' + data.detail);
+                    showResult('fieldOperationResult', 'error', 'Failed to generate field reference: ' + (data.detail || data.message || 'Unknown error'));
                 }
-            } catch (error) { 
-                showResult('fieldOperationResult', 'error', 'Error generating field reference: ' + error.message); 
+            } catch (error) {
+                showResult('fieldOperationResult', 'error', 'Error generating field reference: ' + error.message);
             }
         }
         
@@ -1643,9 +1653,35 @@ ${data.data.leads.map((lead, index) =>
             // TODO: Implement script review modal showing all scripts with their status
         }
 
-        // Placeholder functions for API config
+        // API config: save/load to localStorage (browser only; server uses .env)
         function saveAPIConfig() {
-            showNotification('API configuration save functionality coming soon', 'info');
+            const locationId = document.getElementById('locationId').value?.trim() || '';
+            const privateToken = document.getElementById('privateToken').value?.trim() || '';
+            const agencyApiKey = document.getElementById('agencyApiKey').value?.trim() || '';
+            if (!locationId && !privateToken && !agencyApiKey) {
+                showNotification('Enter at least one value to save', 'info');
+                return;
+            }
+            try {
+                const config = { locationId, privateToken, agencyApiKey };
+                localStorage.setItem(API_CONFIG_STORAGE_KEY, JSON.stringify(config));
+                showNotification('API configuration saved. It will pre-fill next time you open the dashboard.', 'success');
+            } catch (e) {
+                showNotification('Could not save (storage may be disabled)', 'error');
+            }
+        }
+
+        function loadAPIConfig() {
+            try {
+                const raw = localStorage.getItem(API_CONFIG_STORAGE_KEY);
+                if (!raw) return;
+                const config = JSON.parse(raw);
+                if (config.locationId) document.getElementById('locationId').value = config.locationId;
+                if (config.privateToken) document.getElementById('privateToken').value = config.privateToken;
+                if (config.agencyApiKey) document.getElementById('agencyApiKey').value = config.agencyApiKey;
+            } catch (e) {
+                // ignore invalid or missing stored config
+            }
         }
 
         function logout() {

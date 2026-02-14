@@ -12,7 +12,9 @@ from fastapi import Request, HTTPException
 from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
-SECURITY_FILE = os.getenv("SECURITY_FILE", "/app/storage/security/security_data.json")
+# Prefer path beside DB so same volume/permissions apply in Docker
+_SECURITY_DIR = os.getenv("SECURITY_DATA_DIR", "/app/data/security")
+SECURITY_FILE = os.getenv("SECURITY_FILE", os.path.join(_SECURITY_DIR, "security_data.json"))
 
 class IPSecurityManager:
     """
@@ -59,42 +61,48 @@ class IPSecurityManager:
     
     def _load_persistent_data(self):
         """Load blocked IPs and whitelist from persistent storage"""
-        try:
-            # Load from file if exists
-            if os.path.exists(SECURITY_FILE):
-                with open(SECURITY_FILE, "r") as f:
-                    data = json.load(f)
-                    
-                # Load blocked IPs (only those still valid)
-                current_time = time.time()
-                for ip, block_info in data.get("blocked_ips", {}).items():
-                    if block_info.get("blocked_until", 0) > current_time:
-                        self._blocked_ips[ip] = block_info
-                
-                # Load whitelist
-                self._whitelist = set(data.get("whitelist", []))
-                self._trusted_networks = set(data.get("trusted_networks", []))
-                
-                logger.info(f"🔒 Loaded {len(self._blocked_ips)} blocked IPs, {len(self._whitelist)} whitelisted IPs")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not load security data: {e}")
+        load_paths = [SECURITY_FILE, os.path.join("/tmp", "security_data.json")]
+        for path in load_paths:
+            try:
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        data = json.load(f)
+                    current_time = time.time()
+                    for ip, block_info in data.get("blocked_ips", {}).items():
+                        if block_info.get("blocked_until", 0) > current_time:
+                            self._blocked_ips[ip] = block_info
+                    self._whitelist = set(data.get("whitelist", []))
+                    self._trusted_networks = set(data.get("trusted_networks", []))
+                    logger.info("🔒 Loaded %s blocked IPs, %s whitelisted IPs from %s",
+                                len(self._blocked_ips), len(self._whitelist), path)
+                    return
+            except Exception as e:
+                logger.debug("Could not load security data from %s: %s", path, e)
+                continue
     
     def _save_persistent_data(self):
         """Save blocked IPs and whitelist to persistent storage"""
-        try:
-            data = {
-                "blocked_ips": self._blocked_ips,
-                "whitelist": list(self._whitelist),
-                "trusted_networks": list(self._trusted_networks),
-                "saved_at": time.time()
-            }
-            
-            os.makedirs(os.path.dirname(SECURITY_FILE), exist_ok=True)
-            with open(SECURITY_FILE, "w") as f:
-                json.dump(data, f, indent=2)
-                
-        except Exception as e:
-            logger.error(f"❌ Could not save security data: {e}")
+        data = {
+            "blocked_ips": self._blocked_ips,
+            "whitelist": list(self._whitelist),
+            "trusted_networks": list(self._trusted_networks),
+            "saved_at": time.time()
+        }
+        for path in [SECURITY_FILE, os.path.join("/tmp", "security_data.json")]:
+            try:
+                d = os.path.dirname(path)
+                if d:
+                    os.makedirs(d, exist_ok=True)
+                with open(path, "w") as f:
+                    json.dump(data, f, indent=2)
+                return
+            except (OSError, PermissionError) as e:
+                if path == SECURITY_FILE:
+                    logger.debug("Could not save security data to %s: %s; will try fallback", path, e)
+                else:
+                    logger.warning("Could not save security data: %s", e)
+                continue
+        logger.error("❌ Could not save security data to any path")
     
     def get_client_ip(self, request: Request) -> str:
         """Extract the real client IP from request, handling proxies"""

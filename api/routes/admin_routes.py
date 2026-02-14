@@ -39,6 +39,12 @@ class GHLConnectionTest(BaseModel):
     privateToken: str
     agencyApiKey: Optional[str] = None
 
+
+class GenerateFieldReferenceRequest(BaseModel):
+    """Optional credentials; if provided, used instead of server env vars."""
+    locationId: Optional[str] = None
+    privateToken: Optional[str] = None
+
 # Simple GHL API functions (inline to avoid imports)
 def test_ghl_connection(private_token: str, location_id: str) -> Dict:
     """Test GHL API connection"""
@@ -120,21 +126,31 @@ async def test_ghl_connection_endpoint(config: GHLConnectionTest):
 
 # Generate Field Reference
 @router.post("/generate-field-reference")
-async def generate_field_reference():
-    """Generate field_reference.json from current GHL custom fields"""
+async def generate_field_reference(body: Optional[GenerateFieldReferenceRequest] = None):
+    """Generate field_reference.json from current GHL custom fields.
+    Uses request body credentials if both privateToken and locationId are provided; otherwise server env vars.
+    """
     try:
-        # Get all custom fields
-        fields_result = get_ghl_custom_fields(DSP_LOCATION_PIT, DSP_GHL_LOCATION_ID)
+        if body and body.privateToken and body.locationId:
+            token, location_id = body.privateToken.strip(), body.locationId.strip()
+            logger.info("Generate field reference using credentials from request body")
+        else:
+            token, location_id = DSP_LOCATION_PIT, DSP_GHL_LOCATION_ID
+            if not token or not location_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No credentials provided. Set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in request body or in server .env.",
+                )
+        fields_result = get_ghl_custom_fields(token, location_id)
         if not fields_result["success"]:
             status = fields_result.get("status_code")
             detail = f"Failed to retrieve custom fields: {fields_result['error']}"
             if status in (401, 403):
                 detail += (
-                    " GHL rejected the request. Generate Field Reference uses server env vars "
-                    "(GHL_PRIVATE_TOKEN, GHL_LOCATION_ID). Ensure they match valid credentials and "
-                    "are set in .env / docker-compose for this server."
+                    " GHL rejected the request. Use valid credentials in the form above (same as Test connection) "
+                    "or set GHL_PRIVATE_TOKEN and GHL_LOCATION_ID in .env / docker-compose for this server."
                 )
-                logger.warning("Generate field reference: GHL returned %s. Check server GHL env vars.", status)
+                logger.warning("Generate field reference: GHL returned %s.", status)
             raise HTTPException(
                 status_code=401 if status in (401, 403) else 500,
                 detail=detail,
@@ -187,7 +203,7 @@ async def generate_field_reference():
         simple_db_instance.log_activity(
             event_type="field_reference_generated",
             event_data={
-                "location_id": DSP_GHL_LOCATION_ID,
+                "location_id": location_id,
                 "total_fields": len(all_ghl_fields),
                 "client_fields": len(client_fields),
                 "vendor_fields": len(vendor_fields)
