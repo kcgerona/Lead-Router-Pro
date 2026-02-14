@@ -719,6 +719,9 @@ Create Fields from CSV
         }
 
         // Notification System
+        function showAlert(type, message) {
+            showNotification(message, type);
+        }
         function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
             notification.className = `notification ${type}`;
