@@ -95,7 +95,7 @@ services:
     ports:
       - "8081:8080"
     volumes:
-      - sqlite_data:/data
+      - ./data:/data
     command: sqlite_web --host 0.0.0.0 /data/smart_lead_router.db
     networks:
       - app-network
