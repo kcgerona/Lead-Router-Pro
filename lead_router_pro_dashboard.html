@@ -1604,19 +1604,79 @@ ${data.data.leads.map((lead, index) =>
                     break;
                 }
                 
+                const result = await response.json();
+                
+                // 202 = sync started in background; poll for result (avoids 504 timeout)
+                if (response.status === 202 && result.job_id) {
+                    const jobId = result.job_id;
+                    const pollInterval = 2000;
+                    const maxPolls = 180; // 6 minutes
+                    let polls = 0;
+                    const pollOnce = async () => {
+                        const statusRes = await fetch(`${baseURL}/api/v1/admin/sync-database/status?job_id=${encodeURIComponent(jobId)}`);
+                        const statusData = await statusRes.json();
+                        if (statusData.status === 'done' && statusData.result) {
+                            syncStatus.classList.add('hidden');
+                            const r = statusData.result;
+                            const ghlDebug = r.ghl_debug || {};
+                            const debugLine = ghlDebug.token_last8 || ghlDebug.location_id
+                                ? `<div class="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600">GHL used: token (last 8) …${ghlDebug.token_last8 || '—'}, location_id: ${ghlDebug.location_id || '—'}</div>`
+                                : '';
+                            syncResults.classList.remove('hidden');
+                            syncDetails.innerHTML = `
+                                <div class="space-y-2">
+                                    <div><strong>Vendors:</strong> ${r.vendors.updated} updated, ${r.vendors.deleted} deleted, ${r.vendors.added} added</div>
+                                    <div><strong>Leads:</strong> ${r.leads.updated} updated, ${r.leads.deleted} deleted, ${r.leads.added} added</div>
+                                    <div class="mt-2 text-xs text-green-700">${r.message}</div>
+                                    ${debugLine}
+                                </div>
+                            `;
+                            showNotification('Database synchronized successfully!', 'success');
+                            return true;
+                        }
+                        if (statusData.status === 'failed') {
+                            syncStatus.classList.add('hidden');
+                            syncResults.classList.remove('hidden');
+                            syncResults.innerHTML = `
+                                <div class="p-4 bg-red-50 border border-red-200 rounded-lg">
+                                    <h4 class="font-medium text-red-900 mb-2">❌ Sync Failed</h4>
+                                    <div class="text-sm text-red-800">${statusData.error || 'Unknown error'}</div>
+                                </div>
+                            `;
+                            showNotification('Database synchronization failed', 'error');
+                            return true;
+                        }
+                        if (statusData.status === 'running') {
+                            syncProgress.textContent = `Syncing... (${polls * pollInterval / 1000}s)`;
+                        }
+                        return false;
+                    };
+                    while (polls++ < maxPolls) {
+                        if (await pollOnce()) break;
+                        await new Promise(r => setTimeout(r, pollInterval));
+                    }
+                    if (polls > maxPolls) {
+                        syncStatus.classList.add('hidden');
+                        syncResults.classList.remove('hidden');
+                        syncResults.innerHTML = `
+                            <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <h4 class="font-medium text-amber-900 mb-2">⏱️ Sync taking too long</h4>
+                                <div class="text-sm text-amber-800">Polling stopped after 6 minutes. Sync may still be running on the server.</div>
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+                
                 if (!response.ok) {
                     if (response.status === 404) {
                         throw new Error('Sync endpoint not found. Please refresh the page and try again.');
                     }
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(result.message || `HTTP error! status: ${response.status}`);
                 }
                 
-                const result = await response.json();
-                
-                // Hide loading state
+                // Immediate result (200)
                 syncStatus.classList.add('hidden');
-                
-                // Show results
                 if (result.status === 'success') {
                     syncResults.classList.remove('hidden');
                     const ghlDebug = result.ghl_debug || {};

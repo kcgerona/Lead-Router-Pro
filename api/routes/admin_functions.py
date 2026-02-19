@@ -1,5 +1,6 @@
 # api/routes/admin_functions.py
 
+import asyncio
 import logging
 import json
 import uuid
@@ -21,6 +22,9 @@ from config import AppConfig
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin Functions"])
+
+# In-memory store for background sync jobs (avoids 504 gateway timeout on long syncs)
+_sync_jobs: Dict[str, Dict[str, Any]] = {}
 
 # Pydantic models for request bodies
 class BulkDeleteRequest(BaseModel):
@@ -103,105 +107,111 @@ async def sync_single_vendor(contact_id: str):
             "error": str(e)
         }
 
-@router.post("/sync-database")
-async def sync_database():
-    """
-    Enhanced V2 database sync endpoint with bi-directional sync capabilities
-    
-    This function now:
-    1. Fetches ALL contacts from GHL to discover new vendors/leads
-    2. Updates existing vendor and lead records with ALL fields from GHL
-    3. Creates new local records for GHL contacts not in database
-    4. Detects and handles deleted GHL records
-    5. Provides comprehensive statistics about the sync operation
-    """
+def _run_sync_blocking(job_id: str) -> None:
+    """Run sync in thread; store result in _sync_jobs to avoid 504 gateway timeout."""
     try:
-        logger.info("🔄 Database sync initiated from admin dashboard")
-        
-        # Import the enhanced sync V2 module (bi-directional) from services
         from api.services.enhanced_db_sync_v2 import EnhancedDatabaseSync
-        
-        # Initialize the sync service
         sync_service = EnhancedDatabaseSync()
-        
-        # Run the synchronization
         results = sync_service.sync_all()
-        
-        # Prepare response
-        if results['success']:
-            logger.info(f"✅ Sync completed: {results['message']}")
-            # Debug: which GHL credentials were used (last 8 chars only)
-            _token = getattr(sync_service.ghl_api, 'private_token', None) or ''
-            _loc = getattr(sync_service.ghl_api, 'location_id', None) or ''
-            ghl_debug = {
-                "token_last8": _token[-8:] if len(_token) >= 8 else "(not set)",
-                "location_id": _loc or "(not set)"
-            }
-            return {
-                "status": "success",  # Frontend expects 'status' not 'success'
-                "success": True,
-                "message": results['message'],
-                # Frontend expects these at root level
-                "vendors": {
-                    "checked": results['stats'].get('vendors_checked', 0),
-                    "updated": results['stats'].get('vendors_updated', 0),
-                    "added": results['stats'].get('vendors_created', 0),  # Frontend expects 'added' not 'created'
-                    "deleted": results['stats'].get('vendors_deactivated', 0),  # Using deactivated count
-                    "created": results['stats'].get('vendors_created', 0),
-                    "deactivated": results['stats'].get('vendors_deactivated', 0)
+        _token = getattr(sync_service.ghl_api, 'private_token', None) or ''
+        _loc = getattr(sync_service.ghl_api, 'location_id', None) or ''
+        ghl_debug = {"token_last8": _token[-8:] if len(_token) >= 8 else "(not set)", "location_id": _loc or "(not set)"}
+        if results.get('success'):
+            _sync_jobs[job_id] = {
+                "status": "done",
+                "result": {
+                    "status": "success",
+                    "success": True,
+                    "message": results['message'],
+                    "vendors": {
+                        "checked": results['stats'].get('vendors_checked', 0),
+                        "updated": results['stats'].get('vendors_updated', 0),
+                        "added": results['stats'].get('vendors_created', 0),
+                        "deleted": results['stats'].get('vendors_deactivated', 0),
+                        "created": results['stats'].get('vendors_created', 0),
+                        "deactivated": results['stats'].get('vendors_deactivated', 0),
+                    },
+                    "leads": {
+                        "checked": results['stats'].get('leads_checked', 0),
+                        "updated": results['stats'].get('leads_updated', 0),
+                        "added": results['stats'].get('leads_created', 0),
+                        "deleted": results['stats'].get('leads_deleted', 0),
+                        "created": results['stats'].get('leads_created', 0),
+                    },
+                    "stats": {
+                        "ghl_contacts_fetched": results['stats'].get('ghl_contacts_fetched', 0),
+                        "errors": len(results['stats'].get('errors', [])),
+                        "duration": results.get('duration', 0),
+                    },
+                    "ghl_debug": ghl_debug,
+                    "timestamp": datetime.now().isoformat(),
                 },
-                "leads": {
-                    "checked": results['stats'].get('leads_checked', 0),
-                    "updated": results['stats'].get('leads_updated', 0),
-                    "added": results['stats'].get('leads_created', 0),  # Frontend expects 'added' not 'created'
-                    "deleted": results['stats'].get('leads_deleted', 0),
-                    "created": results['stats'].get('leads_created', 0)
-                },
-                "stats": {
-                    "ghl_contacts_fetched": results['stats'].get('ghl_contacts_fetched', 0),
-                    "errors": len(results['stats'].get('errors', [])),
-                    "duration": results.get('duration', 0)
-                },
-                "ghl_debug": ghl_debug,
-                "timestamp": datetime.now().isoformat()
             }
         else:
-            error_msg = results.get('error', 'Unknown error during sync')
-            logger.error(f"❌ Sync failed: {error_msg}")
-            
-            return {
-                "status": "error",  # Frontend expects 'status'
-                "success": False,
-                "message": f"Sync failed: {error_msg}",
+            _sync_jobs[job_id] = {
+                "status": "done",
+                "result": {
+                    "status": "error",
+                    "success": False,
+                    "message": results.get('error', 'Sync failed'),
+                    "vendors": {"updated": 0, "added": 0, "deleted": 0},
+                    "leads": {"updated": 0, "added": 0, "deleted": 0},
+                    "stats": results.get('stats', {}),
+                    "timestamp": datetime.now().isoformat(),
+                },
+            }
+    except Exception as e:
+        logger.exception(f"Sync job {job_id} failed")
+        _sync_jobs[job_id] = {"status": "failed", "error": str(e)}
+
+
+async def _run_sync_background(job_id: str) -> None:
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _run_sync_blocking, job_id)
+
+
+@router.get("/sync-database/status")
+async def sync_database_status(job_id: Optional[str] = None):
+    """Poll for background sync result. Returns status: running | done | failed | unknown."""
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id required")
+    job = _sync_jobs.get(job_id, {})
+    status = job.get("status", "unknown")
+    out = {"job_id": job_id, "status": status}
+    if status == "done" and "result" in job:
+        out["result"] = job["result"]
+    if status == "failed" and "error" in job:
+        out["error"] = job["error"]
+    return out
+
+
+@router.post("/sync-database")
+async def sync_database(background_tasks: BackgroundTasks):
+    """
+    Start database sync in background and return immediately (avoids 504 gateway timeout).
+    Poll GET /sync-database/status?job_id=... for result.
+    """
+    from fastapi.responses import JSONResponse
+    try:
+        logger.info("🔄 Database sync started (background)")
+        job_id = str(uuid.uuid4())
+        _sync_jobs[job_id] = {"status": "running"}
+        background_tasks.add_task(_run_sync_background, job_id)
+        return JSONResponse(
+            status_code=202,
+            content={"status": "accepted", "job_id": job_id, "message": "Sync running. Poll /sync-database/status?job_id=" + job_id}
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to start sync: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "message": str(e),
                 "vendors": {"updated": 0, "added": 0, "deleted": 0},
                 "leads": {"updated": 0, "added": 0, "deleted": 0},
-                "stats": results.get('stats', {}),
-                "timestamp": datetime.now().isoformat()
-            }
-            
-    except ImportError as e:
-        logger.error(f"❌ Failed to import enhanced sync module: {e}")
-        return {
-            "status": "error",
-            "success": False,
-            "message": "Enhanced sync module not found. Please ensure enhanced_db_sync_v2.py is in api/services/.",
-            "vendors": {"updated": 0, "added": 0, "deleted": 0},
-            "leads": {"updated": 0, "added": 0, "deleted": 0},
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        logger.error(f"❌ Unexpected error during sync: {e}")
-        return {
-            "status": "error",
-            "success": False,
-            "message": f"Unexpected error: {str(e)}",
-            "vendors": {"updated": 0, "added": 0, "deleted": 0},
-            "leads": {"updated": 0, "added": 0, "deleted": 0},
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+            },
+        )
 
 
 async def _sync_vendor_using_widget_logic(contact: Dict[str, Any], account_id: str, 
