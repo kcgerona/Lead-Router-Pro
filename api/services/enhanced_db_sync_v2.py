@@ -697,13 +697,30 @@ class EnhancedDatabaseSync:
                 logger.info("   No leads with identifiers found - skipping lead sync")
                 return {}
             
-            # Fetch ALL contacts from GHL and filter for our leads
-            # This is more reliable than individual fetches which can fail
+            # Step 1: Fetch each lead's contact by ID when we have ghl_contact_id (avoids 10k
+            # pagination limit and ensures we find all leads regardless of GHL contact list order)
+            if local_lead_contact_ids:
+                logger.info(f"   Fetching {len(local_lead_contact_ids)} lead contacts by ID from GHL...")
+                for contact_id in local_lead_contact_ids:
+                    try:
+                        contact = self.ghl_api.get_contact_by_id(contact_id)
+                        if contact:
+                            all_leads[contact_id] = contact
+                    except Exception as e:
+                        logger.debug(f"   Could not fetch contact {contact_id}: {e}")
+                    time.sleep(0.12)  # rate limit
+                logger.info(f"   Found {len(all_leads)} leads via fetch-by-ID")
+            
+            # Step 2: Batch-scan GHL contacts to match leads by email (for leads without ghl_contact_id
+            # or to catch any not found by ID)
             limit = 100
             offset = 0
-            matched_count = 0
+            matched_count = len(all_leads)
+            emails_still_needed = set(local_lead_emails.keys()) - {
+                c.get('email', '').lower() for c in all_leads.values() if c.get('email')
+            }
             
-            logger.info("   Fetching all GHL contacts to match with local leads...")
+            logger.info("   Fetching GHL contacts in batches to match by email...")
             
             while True:
                 logger.debug(f"   Fetching GHL contacts batch (offset: {offset}, limit: {limit})")
@@ -734,33 +751,29 @@ class EnhancedDatabaseSync:
                     logger.debug(f"   No more contacts to fetch")
                     break
                 
-                # Check each contact to see if it matches our leads
+                # Check each contact to see if it matches our leads (by email or opportunity; ID already done above)
                 for contact in contacts:
                     contact_id = contact.get('id')
                     contact_email = contact.get('email', '').lower() if contact.get('email') else ''
                     matched = False
                     match_type = ""
                     
-                    # Priority 1: Match by GHL contact ID
-                    if contact_id in local_lead_contact_ids:
-                        all_leads[contact_id] = contact
-                        matched = True
-                        match_type = "by contact ID"
+                    # Skip if already fetched by ID
+                    if contact_id in all_leads:
+                        continue
                     
-                    # Priority 2: Match by email (if not already matched)
-                    elif contact_email and contact_email in local_lead_emails:
+                    # Match by email (for leads without ghl_contact_id or not yet found)
+                    if contact_email and contact_email in local_lead_emails:
                         all_leads[contact_id] = contact
                         matched = True
                         match_type = "by email"
-                        # Update the local lead with the GHL contact ID if it was missing
-                        local_lead_id = local_lead_emails[contact_email]
+                        emails_still_needed.discard(contact_email)
                         logger.info(f"   Found lead by email, updating GHL contact ID: {contact_id}")
                     
-                    # Priority 3: Check opportunity fields in custom fields
+                    # Match by opportunity ID in custom fields
                     if not matched:
                         custom_fields = contact.get('customFields', [])
                         for field in custom_fields:
-                            # Check if any custom field contains an opportunity ID we're tracking
                             field_value = field.get('value', '')
                             if field_value in local_lead_opportunity_ids:
                                 all_leads[contact_id] = contact
@@ -773,12 +786,16 @@ class EnhancedDatabaseSync:
                         contact_name = f"{contact.get('firstName', '')} {contact.get('lastName', '')}".strip()
                         logger.debug(f"   Matched lead {match_type}: {contact_name} ({contact_email})")
                 
-                # Continue to next batch
+                # Early exit if we've matched all emails we needed from batch scan
+                if not emails_still_needed:
+                    logger.info("   Matched all leads by email - stopping batch scan")
+                    break
+                
                 offset += limit
                 
-                # Stop if we've processed a reasonable amount
-                if offset > 10000:  # Safety limit - don't process more than 10k contacts
-                    logger.warning("   Reached 10,000 contact limit - stopping search")
+                # Safety limit - don't scan more than 15k contacts in batch (ID fetch already got most)
+                if offset > 15000:
+                    logger.warning("   Reached 15,000 contact batch limit - stopping search")
                     break
                 
                 time.sleep(0.2)  # Rate limiting
