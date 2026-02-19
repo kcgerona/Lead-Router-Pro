@@ -204,6 +204,7 @@ class EnhancedDatabaseSync:
             limit = 100
             offset = 0
             matched_count = 0
+            total_fetched = 0
             
             while True:
                 logger.info(f"   Fetching GHL contacts (offset: {offset}, limit: {limit})")
@@ -892,24 +893,31 @@ class EnhancedDatabaseSync:
         Leads are only created through webhook form submissions.
         This prevents duplicate leads from being created.
         """
-        processed_ghl_ids = set()
+        # Track which local lead IDs were processed (found in GHL and updated).
+        # local_leads is keyed by both ghl_contact_id and email, so we must use
+        # local lead id to decide "missing", not the dict key (email keys are never in processed_ghl_ids).
+        processed_local_lead_ids = set()
         
         # Process leads that exist in both GHL and local DB
         for ghl_id, ghl_contact in ghl_leads.items():
-            processed_ghl_ids.add(ghl_id)
-            
-            if ghl_id in local_leads:
-                # UPDATE existing lead with latest GHL data
-                self._update_local_lead(local_leads[ghl_id], ghl_contact)
+            # Match by GHL contact ID first, then by email (lead may be keyed only by email locally)
+            local_lead = local_leads.get(ghl_id)
+            if not local_lead and ghl_contact.get('email'):
+                email_lower = ghl_contact.get('email', '').lower()
+                local_lead = local_leads.get(email_lower)
+            if local_lead:
+                self._update_local_lead(local_lead, ghl_contact)
+                processed_local_lead_ids.add(local_lead['id'])
             else:
-                # This shouldn't happen if our fetch logic is correct
-                # But if it does, log it as a warning - DO NOT CREATE
                 logger.warning(f"⚠️ GHL contact {ghl_id} fetched but not found in local leads - skipping")
         
-        # Handle leads that exist locally but not found in GHL
-        for ghl_id, local_lead in local_leads.items():
-            if ghl_id not in processed_ghl_ids:
-                # Lead exists locally but not found in GHL (might be deleted)
+        # Build set of unique local leads by id (local_leads has duplicate entries keyed by email and ghl_id)
+        all_local_lead_ids = set(lead['id'] for lead in local_leads.values())
+        # Handle leads that exist locally but were never found in GHL
+        for local_lead_id in all_local_lead_ids:
+            if local_lead_id not in processed_local_lead_ids:
+                # Find the lead dict (any key is fine)
+                local_lead = next(lead for lead in local_leads.values() if lead['id'] == local_lead_id)
                 self._handle_missing_lead(local_lead)
     
     def _handle_missing_lead(self, local_lead: Dict):
