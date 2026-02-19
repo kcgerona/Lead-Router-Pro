@@ -64,28 +64,21 @@ class OptimizedGoHighLevelAPI:
     # ============================================
     
     def search_contacts(self, query: str = None, email: str = None, phone: str = None, limit: int = 20) -> List[Dict]:
-        """Search contacts using v2 API for better performance"""
+        """Search contacts using v2 API (GET /contacts/ with params). For email lookup prefer search_contacts_by_email."""
         try:
-            # V2 API uses /contacts/ endpoint with query params
             url = f"{self.v2_base_url}/contacts/"
-            
             params = {
                 "locationId": self.location_id,
                 "limit": min(limit, 100)
             }
-            
-            # V2 API supports more specific search parameters
             if email:
                 params["email"] = email
             elif phone:
                 params["phone"] = phone
             elif query:
                 params["query"] = query
-            
             logger.debug(f"🔍 Searching contacts with v2 API: {params}")
-            
             response = requests.get(url, headers=self.v2_headers, params=params, timeout=10)
-            
             if response.status_code == 200:
                 data = response.json()
                 contacts = data.get('contacts', [])
@@ -94,9 +87,40 @@ class OptimizedGoHighLevelAPI:
             else:
                 logger.error(f"❌ v2 contact search failed: {response.status_code} - {response.text}")
                 return []
-                
         except Exception as e:
             logger.error(f"❌ Error searching contacts with v2 API: {str(e)}")
+            return []
+
+    def search_contacts_by_email(self, email: str, location_id: Optional[str] = None) -> List[Dict]:
+        """
+        Search contacts by email using POST /contacts/search (advanced search).
+        Ref: https://marketplace.gohighlevel.com/docs/ghl/contacts/search-contacts-advanced
+        Schema: https://doc.clickup.com/8631005/d/h/87cpx-158396/6e629989abe7fad
+        """
+        try:
+            url = f"{self.v2_base_url}/contacts/search"
+            loc = location_id or self.location_id
+            # POST body: locationId + query (email value alone per API docs)
+            payload = {
+                "locationId": loc,
+                "query": email.strip(),
+            }
+            response = requests.post(url, headers=self.v2_headers, json=payload, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                contacts = data.get("contacts", [])
+                # Filter to exact email match (search can return partial matches)
+                email_lower = email.lower().strip()
+                exact = [c for c in contacts if (c.get("email") or "").lower().strip() == email_lower]
+                result = exact if exact else contacts
+                if result:
+                    logger.info(f"✅ Found {len(result)} contact(s) for email {email[:3]}... via POST /contacts/search")
+                return result
+            else:
+                logger.warning(f"   POST /contacts/search returned {response.status_code} for {email[:3]}...")
+                return []
+        except Exception as e:
+            logger.warning(f"   search_contacts_by_email failed for {email[:3]}...: {e}")
             return []
     
     def get_contact_by_id(self, contact_id: str, location_id: Optional[str] = None) -> Optional[Dict]:

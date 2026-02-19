@@ -748,10 +748,11 @@ class EnhancedDatabaseSync:
             emails_already_found = {c.get('email', '').lower() for c in all_leads.values() if c.get('email')}
             emails_still_needed = set(local_lead_emails.keys()) - emails_already_found
             if emails_still_needed:
-                logger.info(f"   Fetching {len(emails_still_needed)} lead contacts by email from GHL (search API)...")
+                logger.info(f"   Fetching {len(emails_still_needed)} lead contacts by email from GHL (POST /contacts/search)...")
+                loc_id = getattr(self.ghl_api, 'location_id', None) or os.getenv('GHL_LOCATION_ID') or (AppConfig.GHL_LOCATION_ID if hasattr(AppConfig, 'GHL_LOCATION_ID') else None)
                 for email in list(emails_still_needed):
                     try:
-                        contacts = self.ghl_api.search_contacts(email=email, limit=5)
+                        contacts = self.ghl_api.search_contacts_by_email(email, location_id=loc_id)
                         if contacts:
                             c = contacts[0]
                             cid = c.get('id')
