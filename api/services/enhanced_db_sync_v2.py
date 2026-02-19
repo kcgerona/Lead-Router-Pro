@@ -744,18 +744,36 @@ class EnhancedDatabaseSync:
                     time.sleep(0.12)  # rate limit
                 logger.info(f"   Found {len(all_leads)} leads via fetch-by-ID ({len(self._lead_contact_ids_fetch_failed)} fetch failed)")
             
-            # Step 2: Batch-scan GHL contacts to match leads by email (for leads without ghl_contact_id
-            # or to catch any not found by ID)
+            # Step 2: Fetch leads by email via search API (so we find all 208 without depending on list order/limit)
+            emails_already_found = {c.get('email', '').lower() for c in all_leads.values() if c.get('email')}
+            emails_still_needed = set(local_lead_emails.keys()) - emails_already_found
+            if emails_still_needed:
+                logger.info(f"   Fetching {len(emails_still_needed)} lead contacts by email from GHL (search API)...")
+                for email in list(emails_still_needed):
+                    try:
+                        contacts = self.ghl_api.search_contacts(email=email, limit=5)
+                        if contacts:
+                            c = contacts[0]
+                            cid = c.get('id')
+                            if cid:
+                                all_leads[cid] = c
+                                emails_still_needed.discard(email)
+                    except Exception as e:
+                        logger.debug(f"   Search by email failed for {email}: {e}")
+                    time.sleep(0.12)
+                logger.info(f"   Found {len(all_leads)} leads total after fetch-by-email")
+            
+            # Step 3: Batch-scan GHL contacts for any emails still not found (fallback)
             limit = 100
             offset = 0
             matched_count = len(all_leads)
             emails_still_needed = set(local_lead_emails.keys()) - {
                 c.get('email', '').lower() for c in all_leads.values() if c.get('email')
             }
+            if emails_still_needed:
+                logger.info(f"   Fetching GHL contacts in batches to match {len(emails_still_needed)} remaining by email...")
             
-            logger.info("   Fetching GHL contacts in batches to match by email...")
-            
-            while True:
+            while emails_still_needed:
                 logger.debug(f"   Fetching GHL contacts batch (offset: {offset}, limit: {limit})")
                 
                 url = f"{self.ghl_api.v2_base_url}/contacts/"
