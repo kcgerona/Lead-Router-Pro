@@ -200,21 +200,37 @@ class EnhancedDatabaseSync:
                 WHERE ghl_contact_id IS NOT NULL OR email IS NOT NULL
             """)
             
+            local_vendor_contact_ids = set()
             local_vendor_identifiers = {}
             for row in cursor.fetchall():
                 if row[0]:  # Has GHL contact ID
+                    local_vendor_contact_ids.add(row[0])
                     local_vendor_identifiers[row[0]] = {'type': 'contact_id', 'name': row[2]}
                 if row[1]:  # Has email
                     local_vendor_identifiers[row[1].lower()] = {'type': 'email', 'name': row[2]}
             
             conn.close()
             
-            logger.info(f"   Found {len(local_vendor_identifiers)} vendor identifiers to match")
+            logger.info(f"   Found {len(local_vendor_identifiers)} vendor identifiers to match ({len(local_vendor_contact_ids)} with GHL contact ID)")
             
-            # Now fetch contacts from GHL and match against our vendor identifiers
+            # Step 1: Fetch each vendor's contact by ID (guarantees we find them; list endpoint may be paginated/limited)
+            loc_id = getattr(self.ghl_api, 'location_id', None) or os.getenv('GHL_LOCATION_ID') or (AppConfig.GHL_LOCATION_ID if hasattr(AppConfig, 'GHL_LOCATION_ID') else None)
+            if local_vendor_contact_ids:
+                logger.info(f"   Fetching {len(local_vendor_contact_ids)} vendor contacts by ID from GHL...")
+                for contact_id in local_vendor_contact_ids:
+                    try:
+                        contact = self.ghl_api.get_contact_by_id(contact_id, location_id=loc_id)
+                        if contact:
+                            all_vendors[contact_id] = contact
+                    except Exception as e:
+                        logger.debug(f"   Could not fetch vendor contact {contact_id}: {e}")
+                    time.sleep(0.12)
+                logger.info(f"   Found {len(all_vendors)} vendors via fetch-by-ID")
+            
+            # Step 2: Batch-scan GHL contacts to match by email (vendors without ghl_contact_id or as fallback)
             limit = 100
             offset = 0
-            matched_count = 0
+            matched_count = len(all_vendors)
             total_fetched = 0
             
             while True:
