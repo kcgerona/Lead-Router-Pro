@@ -130,7 +130,13 @@ async def sync_database():
         # Prepare response
         if results['success']:
             logger.info(f"✅ Sync completed: {results['message']}")
-            
+            # Debug: which GHL credentials were used (last 8 chars only)
+            _token = getattr(sync_service.ghl_api, 'private_token', None) or ''
+            _loc = getattr(sync_service.ghl_api, 'location_id', None) or ''
+            ghl_debug = {
+                "token_last8": _token[-8:] if len(_token) >= 8 else "(not set)",
+                "location_id": _loc or "(not set)"
+            }
             return {
                 "status": "success",  # Frontend expects 'status' not 'success'
                 "success": True,
@@ -156,6 +162,7 @@ async def sync_database():
                     "errors": len(results['stats'].get('errors', [])),
                     "duration": results.get('duration', 0)
                 },
+                "ghl_debug": ghl_debug,
                 "timestamp": datetime.now().isoformat()
             }
         else:

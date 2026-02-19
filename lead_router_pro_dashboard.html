@@ -1619,11 +1619,16 @@ ${data.data.leads.map((lead, index) =>
                 // Show results
                 if (result.status === 'success') {
                     syncResults.classList.remove('hidden');
+                    const ghlDebug = result.ghl_debug || {};
+                    const debugLine = ghlDebug.token_last8 || ghlDebug.location_id
+                        ? `<div class="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600">GHL used: token (last 8) …${ghlDebug.token_last8 || '—'}, location_id: ${ghlDebug.location_id || '—'}</div>`
+                        : '';
                     syncDetails.innerHTML = `
                         <div class="space-y-2">
                             <div><strong>Vendors:</strong> ${result.vendors.updated} updated, ${result.vendors.deleted} deleted, ${result.vendors.added} added</div>
                             <div><strong>Leads:</strong> ${result.leads.updated} updated, ${result.leads.deleted} deleted, ${result.leads.added} added</div>
                             <div class="mt-2 text-xs text-green-700">${result.message}</div>
+                            ${debugLine}
                         </div>
                     `;
                     showNotification('Database synchronized successfully!', 'success');

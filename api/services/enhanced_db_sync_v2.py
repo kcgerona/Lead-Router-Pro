@@ -103,6 +103,17 @@ class EnhancedDatabaseSync:
         """
         logger.info("🔄 Starting Bi-directional Database Sync")
         logger.info("=" * 60)
+        # Debug: which GHL credentials are used (last 8 chars only)
+        _token = getattr(self.ghl_api, 'private_token', None) or ''
+        _loc = getattr(self.ghl_api, 'location_id', None) or ''
+        logger.info(f"DEBUG GHL private_token (last 8): ...{_token[-8:]}" if len(_token) >= 8 else "DEBUG GHL private_token: (not set or < 8 chars)")
+        logger.info(f"DEBUG GHL location_id: {_loc}")
+        _agency = getattr(self.ghl_api, 'agency_api_key', None) or ''
+        _loc_key = getattr(self.ghl_api, 'location_api_key', None) or ''
+        if _agency:
+            logger.info(f"DEBUG GHL agency_api_key (last 8): ...{_agency[-8:]}" if len(_agency) >= 8 else "DEBUG GHL agency_api_key: (set)")
+        if _loc_key:
+            logger.info(f"DEBUG GHL location_api_key (last 8): ...{_loc_key[-8:]}" if len(_loc_key) >= 8 else "DEBUG GHL location_api_key: (set)")
         
         start_time = datetime.now()
         
