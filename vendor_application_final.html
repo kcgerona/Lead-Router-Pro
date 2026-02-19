@@ -3391,6 +3391,9 @@
             payload.sms_consent = document.getElementById('sms_consent').checked;
             payload.marketing_consent = document.getElementById('marketing_consent').checked;
             
+            // Custom attribute: identify submission as vendor application
+            payload.user_type = 'vendor';
+            
             // Ensure years_in_business is included even if empty
             payload.years_in_business = document.getElementById('years_in_business').value || '';
             

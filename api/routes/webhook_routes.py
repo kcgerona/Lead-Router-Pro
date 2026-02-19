@@ -2119,7 +2119,14 @@ async def process_elementor_webhook_async(
                         pass
             
             # Trigger background tasks based on form type
-            if form_config.get("requires_immediate_routing"):
+            # NEVER create a lead for vendor applications: skip lead routing when user_type is vendor or form is vendor_application
+            is_vendor_submission = (
+                (elementor_payload.get("user_type") or "").strip().lower() == "vendor"
+                or form_config.get("form_type") == "vendor_application"
+            )
+            if is_vendor_submission:
+                logger.info(f"⏭️ Skipping lead creation: vendor application (user_type={elementor_payload.get('user_type')}, form_type={form_config.get('form_type')})")
+            elif form_config.get("requires_immediate_routing"):
                 # FIXED: No more pre-selection - vendor assignment happens AFTER lead creation
                 # Trigger lead routing workflow (vendor assignment will happen inside)
                 await trigger_clean_lead_routing_workflow(
