@@ -671,7 +671,7 @@ class EnhancedDatabaseSync:
         3. Check GHL opportunity ID if available
         """
         all_leads = {}
-        
+        self._lead_contact_ids_fetch_failed = set()
         try:
             # Get all local lead identifiers for matching
             conn = simple_db_instance._get_raw_conn()
@@ -710,17 +710,23 @@ class EnhancedDatabaseSync:
             
             # Step 1: Fetch each lead's contact by ID when we have ghl_contact_id (avoids 10k
             # pagination limit and ensures we find all leads regardless of GHL contact list order)
+            self._lead_contact_ids_fetch_failed = set()  # IDs for which get_contact_by_id returned None
             if local_lead_contact_ids:
                 logger.info(f"   Fetching {len(local_lead_contact_ids)} lead contacts by ID from GHL...")
+                loc_id = getattr(self.ghl_api, 'location_id', None) or os.getenv('GHL_LOCATION_ID') or (AppConfig.GHL_LOCATION_ID if hasattr(AppConfig, 'GHL_LOCATION_ID') else None)
                 for contact_id in local_lead_contact_ids:
                     try:
-                        contact = self.ghl_api.get_contact_by_id(contact_id)
+                        contact = self.ghl_api.get_contact_by_id(contact_id, location_id=loc_id)
                         if contact:
                             all_leads[contact_id] = contact
+                        else:
+                            self._lead_contact_ids_fetch_failed.add(contact_id)
+                            logger.warning(f"   get_contact_by_id returned None for {contact_id} (404 or API error)")
                     except Exception as e:
-                        logger.debug(f"   Could not fetch contact {contact_id}: {e}")
+                        self._lead_contact_ids_fetch_failed.add(contact_id)
+                        logger.warning(f"   Could not fetch contact {contact_id}: {e}")
                     time.sleep(0.12)  # rate limit
-                logger.info(f"   Found {len(all_leads)} leads via fetch-by-ID")
+                logger.info(f"   Found {len(all_leads)} leads via fetch-by-ID ({len(self._lead_contact_ids_fetch_failed)} fetch failed)")
             
             # Step 2: Batch-scan GHL contacts to match leads by email (for leads without ghl_contact_id
             # or to catch any not found by ID)
@@ -940,12 +946,17 @@ class EnhancedDatabaseSync:
                 logger.warning(f"⚠️ GHL contact {ghl_id} fetched but not found in local leads - skipping")
         
         # Build set of unique local leads by id (local_leads has duplicate entries keyed by email and ghl_id)
+        ids_fetch_failed = getattr(self, '_lead_contact_ids_fetch_failed', set())
         all_local_lead_ids = set(lead['id'] for lead in local_leads.values())
         # Handle leads that exist locally but were never found in GHL
         for local_lead_id in all_local_lead_ids:
             if local_lead_id not in processed_local_lead_ids:
-                # Find the lead dict (any key is fine)
                 local_lead = next(lead for lead in local_leads.values() if lead['id'] == local_lead_id)
+                ghl_cid = local_lead.get('ghl_contact_id') or ''
+                # Do NOT mark as deleted when fetch-by-ID failed (404/API error) - avoid false positives
+                if ghl_cid and ghl_cid in ids_fetch_failed:
+                    logger.warning(f"   Skipping mark-deleted for lead {local_lead.get('customer_name')} (ghl_contact_id {ghl_cid}): fetch by ID failed - leaving status unchanged")
+                    continue
                 self._handle_missing_lead(local_lead)
     
     def _handle_missing_lead(self, local_lead: Dict):

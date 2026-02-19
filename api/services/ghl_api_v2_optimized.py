@@ -99,14 +99,14 @@ class OptimizedGoHighLevelAPI:
             logger.error(f"❌ Error searching contacts with v2 API: {str(e)}")
             return []
     
-    def get_contact_by_id(self, contact_id: str) -> Optional[Dict]:
-        """Get contact by ID using v2 API"""
+    def get_contact_by_id(self, contact_id: str, location_id: Optional[str] = None) -> Optional[Dict]:
+        """Get contact by ID using v2 API. Pass location_id to scope to a location (recommended)."""
         try:
-            # V2 endpoint
             url = f"{self.v2_base_url}/contacts/{contact_id}"
-            
-            response = requests.get(url, headers=self.v2_headers, timeout=10)
-            
+            params = {}
+            if location_id or self.location_id:
+                params["locationId"] = location_id or self.location_id
+            response = requests.get(url, headers=self.v2_headers, params=params or None, timeout=15)
             if response.status_code == 200:
                 data = response.json()
                 logger.info(f"✅ Retrieved contact {contact_id} using v2 API")
@@ -114,7 +114,6 @@ class OptimizedGoHighLevelAPI:
             else:
                 logger.error(f"❌ Failed to get contact {contact_id}: {response.status_code}")
                 return None
-                
         except Exception as e:
             logger.error(f"❌ Error getting contact {contact_id}: {str(e)}")
             return None
