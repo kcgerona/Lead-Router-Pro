@@ -589,30 +589,31 @@ Create Fields from CSV
                         <h3 class="text-lg font-semibold text-gray-900">Database Synchronization</h3>
                     </div>
                     <div class="space-y-4">
-                        <div class="p-4 bg-yellow-50 border borde                                    r-yellow-200 rounded-lg">
+                        <div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                             <h4 class="font-medium text-yellow-900 mb-2">⚠️ Important Notice</h4>
                             <p class="text-sm text-yellow-800 mb-3">
-                                This will validate all database records against GoHighLevel (GHL) as the single source of truth.
-                                Records not found in GHL will be deleted from the database.
+                                Sync uses GHL as the source of truth. Existing records are updated; new GHL contacts (vendors or leads) are created locally. Vendors not found in GHL are flagged for review (not deleted). Leads not found in GHL are deactivated.
                             </p>
                         </div>
                         
                         <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                            <h4 class="font-medium text-blue-900 mb-2">Sync Process</h4>
+                            <h4 class="font-medium text-blue-900 mb-2">Sync Process (V3)</h4>
                             <ul class="text-sm text-blue-800 space-y-1">
-                                <li>• Validates existing vendors and leads against GHL</li>
-                                <li>• Updates records if data differs between database and GHL</li>
-                                <li>• Removes orphaned records not found in GHL</li>
-                                <li>• Adds new records from GHL to database</li>
+                                <li>• Fetches contacts from GHL (unified fetch, POST /contacts/search)</li>
+                                <li>• Updates existing vendors and leads when data differs</li>
+                                <li>• Creates new local vendors/leads for contacts in GHL that aren’t in the DB</li>
+                                <li>• Flags vendors missing in GHL; deactivates leads missing in GHL</li>
                             </ul>
                         </div>
                         
-                        <div id="syncStatus" class="hidden p-4 rounded-lg">
-                            <div class="flex items-center space-x-2">
-                                <div class="loading inline-block w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"></div>
-                                <span class="text-sm font-medium">Synchronizing database...</span>
+                        <div id="syncStatus" class="hidden p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                            <div class="flex items-start gap-3">
+                                <div class="loading mt-0.5 w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full flex-shrink-0"></div>
+                                <div class="min-w-0">
+                                    <p id="syncStatusTitle" class="text-sm font-medium text-blue-900">Sending sync request...</p>
+                                    <p id="syncProgress" class="mt-1 text-sm text-blue-700"></p>
+                                </div>
                             </div>
-                            <div id="syncProgress" class="mt-2 text-sm text-gray-600"></div>
                         </div>
                         
                         <div id="syncResults" class="hidden">
@@ -623,7 +624,7 @@ Create Fields from CSV
                         </div>
                         
                         <button id="syncButton" onclick="synchronizeDatabase()" 
-                                class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                                class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-60 disabled:cursor-not-allowed">
                             🔄 Synchronize Database with GHL
                         </button>
                     </div>
@@ -1568,69 +1569,80 @@ ${data.data.leads.map((lead, index) =>
         async function synchronizeDatabase() {
             const syncButton = document.getElementById('syncButton');
             const syncStatus = document.getElementById('syncStatus');
+            const syncStatusTitle = document.getElementById('syncStatusTitle');
             const syncResults = document.getElementById('syncResults');
             const syncProgress = document.getElementById('syncProgress');
             const syncDetails = document.getElementById('syncDetails');
-            
-            // Show loading state
+            const pollInterval = 2000;
+            const maxPolls = 180; // 6 minutes
+
+            function setLoading(title, detail) {
+                syncStatusTitle.textContent = title;
+                syncProgress.textContent = detail || '';
+            }
+
+            function renderSyncSuccess(r) {
+                const v = r.vendors || {};
+                const l = r.leads || {};
+                const created = v.created ?? v.added ?? 0;
+                const deactivated = v.deactivated ?? v.deleted ?? 0;
+                const leadCreated = l.created ?? l.added ?? 0;
+                const leadDeleted = l.deleted ?? 0;
+                const duration = (r.stats && r.stats.duration) ? ` (${Number(r.stats.duration).toFixed(1)}s)` : '';
+                const ghlDebug = r.ghl_debug || {};
+                const debugLine = ghlDebug.token_last8 || ghlDebug.location_id
+                    ? `<div class="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600">GHL: token …${ghlDebug.token_last8 || '—'}, location_id: ${ghlDebug.location_id || '—'}</div>`
+                    : '';
+                return `
+                    <div class="space-y-2">
+                        <div><strong>Vendors:</strong> ${v.updated ?? 0} updated, ${created} created, ${deactivated} flagged (missing in GHL)</div>
+                        <div><strong>Leads:</strong> ${l.updated ?? 0} updated, ${leadCreated} created, ${leadDeleted} deactivated</div>
+                        <div class="mt-2 text-xs text-green-700">${r.message || ''}${duration}</div>
+                        ${debugLine}
+                    </div>
+                `;
+            }
+
             syncButton.disabled = true;
             syncButton.innerHTML = '⏳ Synchronizing...';
             syncStatus.classList.remove('hidden');
-            syncStatus.className = 'p-4 bg-blue-50 border border-blue-200 rounded-lg';
             syncResults.classList.add('hidden');
-            
+            setLoading('Sending sync request...', 'Starting V3 sync (unified GHL fetch)...');
+
             try {
-                syncProgress.textContent = 'Starting synchronization process...';
-                
-                // Try the request with a retry for 404 errors (proxy/routing delays)
                 let response;
                 let retryCount = 0;
                 const maxRetries = 2;
-                
+
                 while (retryCount <= maxRetries) {
                     response = await fetch(`${baseURL}/api/v1/admin/sync-database`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        }
+                        headers: { 'Content-Type': 'application/json' }
                     });
-                    
                     if (response.status === 404 && retryCount < maxRetries) {
                         retryCount++;
-                        syncProgress.textContent = `Route not ready, retrying (${retryCount}/${maxRetries})...`;
-                        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+                        setLoading('Sending sync request...', `Route not ready, retrying (${retryCount}/${maxRetries})...`);
+                        await new Promise(r => setTimeout(r, 1000));
                         continue;
                     }
                     break;
                 }
-                
+
                 const result = await response.json();
-                
-                // 202 = sync started in background; poll for result (avoids 504 timeout)
+
                 if (response.status === 202 && result.job_id) {
                     const jobId = result.job_id;
-                    const pollInterval = 2000;
-                    const maxPolls = 180; // 6 minutes
+                    setLoading('Sync running in background...', `Polling every ${pollInterval / 1000}s for result.`);
                     let polls = 0;
                     const pollOnce = async () => {
                         const statusRes = await fetch(`${baseURL}/api/v1/admin/sync-database/status?job_id=${encodeURIComponent(jobId)}`);
                         const statusData = await statusRes.json();
                         if (statusData.status === 'done' && statusData.result) {
                             syncStatus.classList.add('hidden');
-                            const r = statusData.result;
-                            const ghlDebug = r.ghl_debug || {};
-                            const debugLine = ghlDebug.token_last8 || ghlDebug.location_id
-                                ? `<div class="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600">GHL used: token (last 8) …${ghlDebug.token_last8 || '—'}, location_id: ${ghlDebug.location_id || '—'}</div>`
-                                : '';
                             syncResults.classList.remove('hidden');
-                            syncDetails.innerHTML = `
-                                <div class="space-y-2">
-                                    <div><strong>Vendors:</strong> ${r.vendors.updated} updated, ${r.vendors.deleted} deleted, ${r.vendors.added} added</div>
-                                    <div><strong>Leads:</strong> ${r.leads.updated} updated, ${r.leads.deleted} deleted, ${r.leads.added} added</div>
-                                    <div class="mt-2 text-xs text-green-700">${r.message}</div>
-                                    ${debugLine}
-                                </div>
-                            `;
+                            const res = statusData.result;
+                            syncResults.innerHTML = '<div class="p-4 bg-green-50 border border-green-200 rounded-lg"><h4 class="font-medium text-green-900 mb-2">✅ Sync Complete</h4><div id="syncDetails" class="text-sm text-green-800"></div></div>';
+                            document.getElementById('syncDetails').innerHTML = renderSyncSuccess(res);
                             showNotification('Database synchronized successfully!', 'success');
                             return true;
                         }
@@ -1647,7 +1659,8 @@ ${data.data.leads.map((lead, index) =>
                             return true;
                         }
                         if (statusData.status === 'running') {
-                            syncProgress.textContent = `Syncing... (${polls * pollInterval / 1000}s)`;
+                            const elapsed = (polls * pollInterval) / 1000;
+                            setLoading('Sync running in background...', `Polling for result… (${elapsed}s)`);
                         }
                         return false;
                     };
@@ -1667,40 +1680,24 @@ ${data.data.leads.map((lead, index) =>
                     }
                     return;
                 }
-                
+
                 if (!response.ok) {
-                    if (response.status === 404) {
-                        throw new Error('Sync endpoint not found. Please refresh the page and try again.');
-                    }
+                    if (response.status === 404) throw new Error('Sync endpoint not found. Please refresh the page and try again.');
                     throw new Error(result.message || `HTTP error! status: ${response.status}`);
                 }
-                
-                // Immediate result (200)
+
                 syncStatus.classList.add('hidden');
-                if (result.status === 'success') {
+                if (result.success || result.status === 'success') {
                     syncResults.classList.remove('hidden');
-                    const ghlDebug = result.ghl_debug || {};
-                    const debugLine = ghlDebug.token_last8 || ghlDebug.location_id
-                        ? `<div class="mt-2 pt-2 border-t border-green-200 text-xs text-gray-600">GHL used: token (last 8) …${ghlDebug.token_last8 || '—'}, location_id: ${ghlDebug.location_id || '—'}</div>`
-                        : '';
-                    syncDetails.innerHTML = `
-                        <div class="space-y-2">
-                            <div><strong>Vendors:</strong> ${result.vendors.updated} updated, ${result.vendors.deleted} deleted, ${result.vendors.added} added</div>
-                            <div><strong>Leads:</strong> ${result.leads.updated} updated, ${result.leads.deleted} deleted, ${result.leads.added} added</div>
-                            <div class="mt-2 text-xs text-green-700">${result.message}</div>
-                            ${debugLine}
-                        </div>
-                    `;
+                    syncResults.innerHTML = '<div class="p-4 bg-green-50 border border-green-200 rounded-lg"><h4 class="font-medium text-green-900 mb-2">✅ Sync Complete</h4><div id="syncDetails" class="text-sm text-green-800"></div></div>';
+                    document.getElementById('syncDetails').innerHTML = renderSyncSuccess(result);
                     showNotification('Database synchronized successfully!', 'success');
                 } else {
                     throw new Error(result.message || 'Sync failed');
                 }
-                
             } catch (error) {
                 console.error('Sync error:', error);
                 syncStatus.classList.add('hidden');
-                
-                // Show error state
                 syncResults.classList.remove('hidden');
                 syncResults.innerHTML = `
                     <div class="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -1710,7 +1707,6 @@ ${data.data.leads.map((lead, index) =>
                 `;
                 showNotification('Database synchronization failed', 'error');
             } finally {
-                // Reset button
                 syncButton.disabled = false;
                 syncButton.innerHTML = '🔄 Synchronize Database with GHL';
             }

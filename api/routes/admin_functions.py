@@ -45,11 +45,10 @@ async def sync_single_vendor(contact_id: str):
     try:
         logger.info(f"🔄 Single vendor sync initiated for GHL contact: {contact_id}")
         
-        # Import the enhanced sync V2 module
-        from api.services.enhanced_db_sync_v2 import EnhancedDatabaseSync
+        # Use enhanced sync V3 (unified fetch, GHL signals for vendor/lead, create missing)
+        from api.services.enhanced_db_sync_v3 import EnhancedDatabaseSyncV3
         
-        # Initialize the sync service
-        sync_service = EnhancedDatabaseSync()
+        sync_service = EnhancedDatabaseSyncV3()
         
         # Fetch the specific contact from GHL
         ghl_contact = sync_service.ghl_api.get_contact_by_id(contact_id)
@@ -108,10 +107,10 @@ async def sync_single_vendor(contact_id: str):
         }
 
 def _run_sync_blocking(job_id: str) -> None:
-    """Run sync in thread; store result in _sync_jobs to avoid 504 gateway timeout."""
+    """Run sync in thread; store result in _sync_jobs to avoid 504 gateway timeout. Uses V3 (unified fetch, POST /contacts/search)."""
     try:
-        from api.services.enhanced_db_sync_v2 import EnhancedDatabaseSync
-        sync_service = EnhancedDatabaseSync()
+        from api.services.enhanced_db_sync_v3 import EnhancedDatabaseSyncV3
+        sync_service = EnhancedDatabaseSyncV3()
         results = sync_service.sync_all()
         _token = getattr(sync_service.ghl_api, 'private_token', None) or ''
         _loc = getattr(sync_service.ghl_api, 'location_id', None) or ''

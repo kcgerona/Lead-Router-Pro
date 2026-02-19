@@ -64,7 +64,7 @@ class OptimizedGoHighLevelAPI:
     # ============================================
     
     def search_contacts(self, query: str = None, email: str = None, phone: str = None, limit: int = 20) -> List[Dict]:
-        """Search contacts using v2 API (GET /contacts/ with params). For email lookup prefer search_contacts_by_email."""
+        """Deprecated: GET /contacts/ is deprecated. Use search_contacts_paginated (POST /contacts/search) or search_contacts_by_email for email lookup."""
         try:
             url = f"{self.v2_base_url}/contacts/"
             params = {
@@ -122,6 +122,53 @@ class OptimizedGoHighLevelAPI:
         except Exception as e:
             logger.warning(f"   search_contacts_by_email failed for {email[:3]}...: {e}")
             return []
+
+    def search_contacts_paginated(
+        self,
+        location_id: Optional[str] = None,
+        limit: int = 500,
+        search_after: Optional[List[Any]] = None,
+        query: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        List/search contacts using POST /contacts/search (non-deprecated).
+        Use this instead of GET /contacts/ which is deprecated.
+        Ref: https://marketplace.gohighlevel.com/docs/ghl/contacts/search-contacts-advanced
+        Schema: https://doc.clickup.com/8631005/d/h/87cpx-158396/6e629989abe7fad
+
+        :param location_id: Location to search (defaults to instance location_id).
+        :param limit: Max contacts per request (default 500; use up to 500).
+        :param search_after: Cursor from previous response (last contact's "searchAfter" field).
+        :param query: Optional search query (omit or empty to list all).
+        :return: {"contacts": [...], "total": int, "search_after": [...] or None}
+                 "search_after" is the cursor for the next page (from last contact).
+        """
+        try:
+            url = f"{self.v2_base_url}/contacts/search"
+            loc = location_id or self.location_id
+            payload = {
+                "locationId": loc,
+                "limit": min(max(1, limit), 500),
+            }
+            if query is not None and str(query).strip():
+                payload["query"] = str(query).strip()
+            if search_after is not None and len(search_after) > 0:
+                payload["searchAfter"] = search_after
+            response = requests.post(url, headers=self.v2_headers, json=payload, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"❌ POST /contacts/search failed: {response.status_code} - {response.text[:200]}")
+                return {"contacts": [], "total": 0, "search_after": None}
+            data = response.json()
+            contacts = data.get("contacts") or []
+            total = data.get("total", 0)
+            next_cursor = None
+            if contacts and isinstance(contacts[-1], dict) and "searchAfter" in contacts[-1]:
+                next_cursor = contacts[-1].get("searchAfter")
+            logger.info(f"✅ POST /contacts/search returned {len(contacts)} contacts (total={total})")
+            return {"contacts": contacts, "total": total, "search_after": next_cursor}
+        except Exception as e:
+            logger.error(f"❌ search_contacts_paginated failed: {e}")
+            return {"contacts": [], "total": 0, "search_after": None}
     
     def get_contact_by_id(self, contact_id: str, location_id: Optional[str] = None) -> Optional[Dict]:
         """Get contact by ID using v2 API. Pass location_id to scope to a location (recommended)."""
