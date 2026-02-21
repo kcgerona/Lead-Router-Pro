@@ -113,6 +113,13 @@ class DependencyManager:
                 install_command="pip install bcrypt==4.1.2",
                 fallback_message="Password security reduced"
             ),
+            "argon2": DependencyInfo(
+                name="argon2",
+                level=DependencyLevel.CORE,
+                purpose="Argon2 password hashing (auth default)",
+                install_command="pip install argon2-cffi==23.1.0",
+                fallback_message="Argon2 hashing unavailable - auth may fall back or fail"
+            ),
             
             # ===== OPTIONAL DEPENDENCIES =====
             "redis": DependencyInfo(

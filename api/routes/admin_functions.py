@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
-from sqlalchemy import text
+from sqlalchemy import text, bindparam
 
 # Import the proven components used by vendor widget
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -927,15 +927,26 @@ async def get_filtered_leads(
         params = {}
         
         if status:
-            query += " AND l.status = :status"
-            params["status"] = status
+            if status == "new":
+                # Include both "new" and "new lead" (sync v3 uses "new lead")
+                query += " AND l.status IN :new_statuses"
+                params["new_statuses"] = ["new", "new lead"]
+            else:
+                query += " AND l.status = :status"
+                params["status"] = status
         
-        if not include_inactive:
+        # Exclude inactive (deleted from GHL) only when not explicitly filtering for them
+        if not include_inactive and status != "inactive_ghl_deleted":
             query += " AND l.status != 'inactive_ghl_deleted'"
         
         query += " ORDER BY l.created_at DESC"
         
-        result = session.execute(text(query), params)
+        # Use expanding bind for IN clause so SQLite gets (?, ?) with both values
+        if status == "new":
+            stmt = text(query).bindparams(bindparam("new_statuses", expanding=True))
+            result = session.execute(stmt, params)
+        else:
+            result = session.execute(text(query), params)
         leads = []
         
         for row in result:
