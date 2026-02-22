@@ -75,8 +75,8 @@ VENDOR_SOURCE_KEYWORD = "Vendor Application"
 VENDOR_TAGS = {"new vendor", "new vendor application", "manually approved"}
 # Tags that indicate a contact is a lead
 LEAD_TAGS = {"new lead"}
-# Lead: if "new lead" tag -> status "new lead"
-LEAD_TAG_NEW_LEAD_STATUS = "new lead"
+# Lead: if "new lead" tag -> status "new"
+LEAD_TAG_NEW_LEAD_STATUS = "new"
 # Vendor status from tags: (level, tag, status) — higher level wins
 VENDOR_TAG_LEVELS = [
     (0, "new vendor application", "new application"),
@@ -626,7 +626,7 @@ class EnhancedDatabaseSyncV3:
         return status
 
     def _get_lead_status_from_tags(self, ghl_contact: Dict) -> Optional[str]:
-        """Lead status from tags: 'new lead' -> 'new lead'. Returns None to leave unchanged."""
+        """Lead status from tags: 'new lead' -> 'new'. Returns None to leave unchanged."""
         tags_list = self._get_contact_tags_list(ghl_contact)
         if "new lead" in tags_list:
             return LEAD_TAG_NEW_LEAD_STATUS
@@ -775,7 +775,7 @@ class EnhancedDatabaseSyncV3:
                         updates['service_state'] = loc.get('state', '')
             except Exception:
                 pass
-        # Lead status from tags (e.g. "new lead" -> unassigned; default pending)
+        # Lead status from tags (e.g. "new lead" -> "new"; default pending)
         tag_status = self._get_lead_status_from_tags(ghl_contact)
         if tag_status is not None and lead.get('status') != tag_status:
             updates['status'] = tag_status
