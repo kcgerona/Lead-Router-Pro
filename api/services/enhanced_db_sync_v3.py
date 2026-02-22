@@ -79,8 +79,8 @@ LEAD_TAGS = {"new lead"}
 LEAD_TAG_NEW_LEAD_STATUS = "new"
 # Vendor status from tags: (level, tag, status) — higher level wins
 VENDOR_TAG_LEVELS = [
-    (0, "new vendor application", "new application"),
-    (1, "onboarding in process", "onboarding in process"),
+    (0, "new vendor application", "pending"),
+    (1, "onboarding in process", "pending"),
     (2, "manual approval", "pending"),
     (3, "manually approved", "active"),
     (4, "deactivated", "deactivated"),
