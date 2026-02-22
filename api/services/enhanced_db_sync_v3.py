@@ -58,6 +58,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from config import AppConfig
 from api.services.ghl_api_v2_optimized import OptimizedGoHighLevelAPI
 from database.simple_connection import db as simple_db_instance
+from utils.ghl_contact_classifier import (
+    get_contact_tags_list,
+    is_vendor_by_ghl_signals,
+    is_staff_contact,
+    get_vendor_status_from_tags,
+    get_lead_status_from_tags,
+    DEFAULT_VENDOR_STATUS,
+    MISSING_IN_GHL_STATUS,
+    INACTIVE_GHL_DELETED_STATUS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,30 +78,6 @@ FETCH_BY_ID_WORKERS = 3
 # Pagination for POST /contacts/search (non-deprecated); max 500 per request
 SEARCH_PAGE_LIMIT = 500
 LIST_SCAN_CAP = 15000  # max contacts to scan in fallback
-
-# GHL signals: treat contact as vendor if source contains this (even when type=lead)
-VENDOR_SOURCE_KEYWORD = "Vendor Application"
-# Tags that indicate a contact is a vendor (case-insensitive)
-VENDOR_TAGS = {"new vendor", "new vendor application", "manually approved"}
-# Tags that indicate a contact is a lead
-LEAD_TAGS = {"new lead"}
-# Lead: if "new lead" tag -> status "new"
-LEAD_TAG_NEW_LEAD_STATUS = "new"
-# Vendor status from tags: (level, tag, status) — higher level wins
-VENDOR_TAG_LEVELS = [
-    (0, "new vendor application", "pending"),
-    (1, "onboarding in process", "pending"),
-    (2, "manual approval", "pending"),
-    (3, "manually approved", "active"),
-    (4, "deactivated", "deactivated"),
-    (5, "reactivated", "active"),
-]
-DEFAULT_VENDOR_STATUS = "pending"
-DEFAULT_LEAD_STATUS = "pending"
-# Status when lead/vendor exists locally but is not found in GHL contacts
-MISSING_IN_GHL_STATUS = "missing_in_ghl"
-# Status when lead/vendor does not exist on GHL (set for both in that case)
-INACTIVE_GHL_DELETED_STATUS = "inactive_ghl_deleted"
 
 
 class EnhancedDatabaseSyncV3:
@@ -390,53 +376,17 @@ class EnhancedDatabaseSyncV3:
 
         return contact_map
 
-    def _get_contact_tags_list(self, ghl_contact: Dict) -> List[str]:
-        """Return normalized list of tag strings (lowercase) from a GHL contact."""
-        tags_raw = ghl_contact.get("tags") or []
-        if isinstance(tags_raw, str):
-            return [t.strip().lower() for t in tags_raw.split(",") if t.strip()]
-        if isinstance(tags_raw, list):
-            out = []
-            for t in tags_raw:
-                if isinstance(t, str):
-                    out.append(t.strip().lower())
-                elif isinstance(t, dict):
-                    name = (t.get("name") or t.get("tag") or "").strip().lower()
-                    if name:
-                        out.append(name)
-                else:
-                    out.append(str(t).strip().lower())
-            return out
-        return []
-
-    def _is_vendor_by_ghl_signals(self, ghl_contact: Dict) -> bool:
-        """
-        True if GHL contact should be treated as a vendor based on source or tags,
-        even when type=lead. Source containing 'Vendor Application' or tags like
-        'new vendor', 'new vendor application', 'manually approved'.
-        """
-        source = (ghl_contact.get("source") or "").strip()
-        if VENDOR_SOURCE_KEYWORD.lower() in source.lower():
-            return True
-        tags = self._get_contact_tags_list(ghl_contact)
-        return bool(tags and any(t in VENDOR_TAGS for t in tags))
-
-    def _is_staff_contact(self, ghl_contact: Dict) -> bool:
-        """True if GHL contact type is staff; staff should not be added as vendor or lead."""
-        contact_type = (ghl_contact.get("type") or "").strip().lower()
-        return contact_type == "staff"
-
     def _classify_vendor_contacts(self, contact_map: Dict[str, Dict], identifiers: Dict[str, Any]) -> Dict[str, Dict]:
         vendor_ids = identifiers.get("vendor_contact_ids") or set()
         vendor_emails = identifiers.get("vendor_emails") or set()
         return {
             cid: c
             for cid, c in contact_map.items()
-            if not self._is_staff_contact(c)
+            if not is_staff_contact(c)
             and (
                 cid in vendor_ids
                 or ((c.get("email") or "").strip().lower() in vendor_emails)
-                or self._is_vendor_by_ghl_signals(c)
+                or is_vendor_by_ghl_signals(c)
             )
         }
 
@@ -447,9 +397,9 @@ class EnhancedDatabaseSyncV3:
         return {
             cid: c
             for cid, c in contact_map.items()
-            if not self._is_staff_contact(c)
+            if not is_staff_contact(c)
             and (cid in lead_ids or ((c.get("email") or "").strip().lower() in lead_emails))
-            and not self._is_vendor_by_ghl_signals(c)
+            and not is_vendor_by_ghl_signals(c)
         }
 
     # -------------------------------------------------------------------------
@@ -552,7 +502,7 @@ class EnhancedDatabaseSyncV3:
         ghl_user = custom_fields.get('HXVNT4y8OynNokWAfO2D', '').strip()
         if ghl_user and not vendor.get('ghl_user_id'):
             updates['ghl_user_id'] = ghl_user
-        tag_status = self._get_vendor_status_from_tags(ghl_contact)
+        tag_status = get_vendor_status_from_tags(ghl_contact)
         if vendor.get('status') != tag_status:
             updates['status'] = tag_status
         zip_val = custom_fields.get('yDcN0FmwI3xacyxAuTWs', '').strip()
@@ -613,25 +563,6 @@ class EnhancedDatabaseSyncV3:
                 return {'type': 'state', 'states': items, 'counties': []}
         return {'type': None, 'states': None, 'counties': None}
 
-    def _get_vendor_status_from_tags(self, ghl_contact: Dict) -> str:
-        """Vendor status from tags by level; higher level wins."""
-        tags_list = self._get_contact_tags_list(ghl_contact)
-        tags_set = set(tags_list)
-        best_level = -1
-        status = DEFAULT_VENDOR_STATUS
-        for level, tag, st in VENDOR_TAG_LEVELS:
-            if tag in tags_set and level > best_level:
-                best_level = level
-                status = st
-        return status
-
-    def _get_lead_status_from_tags(self, ghl_contact: Dict) -> Optional[str]:
-        """Lead status from tags: 'new lead' -> 'new'. Returns None to leave unchanged."""
-        tags_list = self._get_contact_tags_list(ghl_contact)
-        if "new lead" in tags_list:
-            return LEAD_TAG_NEW_LEAD_STATUS
-        return None
-
     def _values_differ(self, current: Any, new: Any, field_name: str) -> bool:
         if current is None and new == '':
             return False
@@ -654,7 +585,7 @@ class EnhancedDatabaseSyncV3:
             if not account:
                 logger.error("❌ No account found for location")
                 return
-            tag_status = self._get_vendor_status_from_tags(ghl_contact)
+            tag_status = get_vendor_status_from_tags(ghl_contact)
             vendor_id = simple_db_instance.create_vendor(
                 account_id=account['id'],
                 name=f"{ghl_contact.get('firstName', '')} {ghl_contact.get('lastName', '')}".strip(),
@@ -776,7 +707,7 @@ class EnhancedDatabaseSyncV3:
             except Exception:
                 pass
         # Lead status from tags (e.g. "new lead" -> "new"; default pending)
-        tag_status = self._get_lead_status_from_tags(ghl_contact)
+        tag_status = get_lead_status_from_tags(ghl_contact)
         if tag_status is not None and lead.get('status') != tag_status:
             updates['status'] = tag_status
         return updates
@@ -792,7 +723,7 @@ class EnhancedDatabaseSyncV3:
                 logger.error("❌ No account found for location - cannot create lead")
                 return
             import uuid
-            status = self._get_lead_status_from_tags(ghl_contact) or "unassigned"
+            status = get_lead_status_from_tags(ghl_contact) or "unassigned"
             zip_code = (
                 custom_fields.get('RmAja1dnU0u42ECXhCo9', '') or
                 str(ghl_contact.get('postalCode') or '')
