@@ -428,8 +428,13 @@ class EnhancedDatabaseSync:
         # Status from tags: "manually approved" -> active, else -> pending
         tag_based_status = self._get_vendor_status_from_tags(ghl_contact)
         if vendor.get('status') != tag_based_status:
-            updates['status'] = tag_based_status
-            logger.info(f"   ✅ Setting vendor status to {tag_based_status} (from tags)")
+            # Do not downgrade active -> pending: preserve manual approval when tags
+            # are missing or ambiguous in GHL API response (e.g. after lead assignment/sync).
+            if vendor.get('status') == 'active' and tag_based_status == 'pending':
+                pass  # keep active
+            else:
+                updates['status'] = tag_based_status
+                logger.info(f"   ✅ Setting vendor status to {tag_based_status} (from tags)")
         
         # Process service_zip_codes to derive coverage fields
         service_zip_codes_value = custom_fields.get('yDcN0FmwI3xacyxAuTWs', '').strip()

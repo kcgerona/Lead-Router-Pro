@@ -41,6 +41,7 @@ from api.services.service_categories import (
 
 # Import the new service dictionary mapper for intelligent field consolidation
 from api.services.webhook_integration_patch import process_webhook_with_service_mapping
+from api.services.assigned_to_history import record_assigned_to_change
 
 
 logger = logging.getLogger(__name__)
@@ -2200,13 +2201,21 @@ async def assign_vendor_to_lead(
         logger.info(f"   Service: {specific_service}")
         logger.info(f"   Location: {service_county}, {service_state} {service_zip}")
         
-        # Find matching vendors
+        # Exclude vendors who already rejected this lead (don't reassign)
+        lead = simple_db_instance.get_lead_by_id(lead_id)
+        ghl_contact_id = (lead.get("ghl_contact_id") if lead else None) or ""
+        rejected_ghl_user_ids = simple_db_instance.get_rejected_ghl_user_ids_for_contact(ghl_contact_id) if ghl_contact_id else set()
+        if rejected_ghl_user_ids:
+            logger.info(f"   Excluding {len(rejected_ghl_user_ids)} vendor(s) who previously rejected this lead")
+        
+        # Find matching vendors (service match, location match, active + taking work, not rejected)
         matching_vendors = lead_routing_service.find_matching_vendors(
             account_id=account_id,
             service_category=specific_service.split(" - ")[0] if " - " in specific_service else specific_service,
             zip_code=service_zip,
             priority=priority,
-            specific_service=specific_service
+            specific_service=specific_service,
+            exclude_ghl_user_ids=rejected_ghl_user_ids
         )
         
         if not matching_vendors:
@@ -2251,6 +2260,15 @@ async def assign_vendor_to_lead(
                 
                 if ghl_api.update_opportunity(opportunity_id, update_data):
                     logger.info(f"✅ Assigned GHL opportunity {opportunity_id} to {vendor_name}")
+                    # Record assignment in history (approved); used to avoid reassigning if vendor later rejects
+                    if ghl_contact_id and vendor_ghl_user_id:
+                        record_assigned_to_change(
+                            ghl_contact_id=ghl_contact_id,
+                            new_ghl_user_id=vendor_ghl_user_id,
+                            previous_ghl_user_id=None,
+                            service_details={"lead_id": lead_id, "opportunity_id": opportunity_id},
+                            status="approved",
+                        )
                     return {"success": True, "vendor_id": vendor_id, "vendor_name": vendor_name}
                 else:
                     logger.error(f"❌ Failed to update GHL opportunity")
@@ -3532,6 +3550,19 @@ async def handle_ghl_new_contact_trigger(request: Request):
                             
                             if ghl_assignment_success:
                                 logger.info(f"✅ Assigned opportunity to vendor in GHL")
+                                record_assigned_to_change(
+                                    ghl_contact_id=contact_id,
+                                    new_ghl_user_id=selected_vendor["ghl_user_id"],
+                                    previous_ghl_user_id=None,
+                                    service_details={
+                                        "source": "process_new_contact",
+                                        "service_category": service_category,
+                                        "specific_service": final_specific_service,
+                                        "zip_code": zip_code,
+                                        "lead_id": lead_id,
+                                        "opportunity_id": opportunity_id,
+                                    },
+                                )
                             else:
                                 logger.warning(f"⚠️ Failed to assign opportunity in GHL")
                         except Exception as e:

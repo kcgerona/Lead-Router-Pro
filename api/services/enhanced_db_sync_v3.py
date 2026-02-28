@@ -504,7 +504,12 @@ class EnhancedDatabaseSyncV3:
             updates['ghl_user_id'] = ghl_user
         tag_status = get_vendor_status_from_tags(ghl_contact)
         if vendor.get('status') != tag_status:
-            updates['status'] = tag_status
+            # Do not downgrade active -> pending: preserve manual approval when tags are
+            # missing or ambiguous in GHL API response (e.g. after lead assignment/sync).
+            if vendor.get('status') == 'active' and tag_status == DEFAULT_VENDOR_STATUS:
+                pass  # keep active
+            else:
+                updates['status'] = tag_status
         zip_val = custom_fields.get('yDcN0FmwI3xacyxAuTWs', '').strip()
         if zip_val:
             cov = self._parse_coverage_from_zip_codes(zip_val)

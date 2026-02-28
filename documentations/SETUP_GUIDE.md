@@ -140,9 +140,21 @@ MAX_RETRIES=3
 ### 1. Obtain API Credentials
 
 #### Location ID
-1. Log into GoHighLevel
-2. Navigate to Settings → Business Info
-3. Copy the Location ID
+1. Log into GoHighLevel (in the **sub-account / location** you use for leads)
+2. Navigate to **Settings → Business Info** (or **Settings → Business Profile**)
+3. Copy the **Location ID** — this is the sub-account identifier (use for `GHL_LOCATION_ID`)
+
+#### Company ID (not the same as Location ID)
+`GHL_COMPANY_ID` is the **agency/company** identifier. It is **not** the Location ID. It is required for **V2 user creation** (e.g. creating vendor users in GHL).
+
+- **Do not** set `GHL_COMPANY_ID` to the same value as `GHL_LOCATION_ID`; that will break V2 user creation.
+- **How to get Company ID:**
+  1. In GoHighLevel, open the **sub-account switcher** (top left) and choose **Switch to Agency View**.
+  2. Go to **Settings** (bottom left) → **Company** tab.
+  3. The **Company ID** may appear in agency/company settings or in the page URL when in agency context. If you use a Private Integration Token or OAuth, the company (agency) ID is often returned in API responses (e.g. when exchanging for a location token).
+  4. Alternatively, use the HighLevel API docs (e.g. [Users API](https://marketplace.gohighlevel.com/docs/ghl/users/create-user)) and your existing agency/location tokens to identify the company (agency) scope for `POST /users/` (the request body uses `companyId`).
+
+Use this value in `.env` as `GHL_COMPANY_ID=your_company_id_here`.
 
 #### Private Token
 1. Go to Settings → Integrations → API

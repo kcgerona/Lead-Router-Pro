@@ -77,14 +77,32 @@ async def sync_single_vendor(contact_id: str):
         else:
             existing_vendor = simple_db_instance.get_vendor_by_ghl_contact_id(contact_id)
         
+        from utils.ghl_contact_classifier import is_vendor_by_ghl_signals
+        cid = (ghl_contact.get('id') or '').strip()
+        
         if existing_vendor:
-            # Update existing vendor using the same logic as full sync
-            sync_service._update_local_vendor(existing_vendor, ghl_contact)
-            action = "updated"
+            # Only apply this contact to the vendor if it's actually the vendor's contact
+            # (same GHL contact id or contact has vendor tags). Avoid overwriting vendor
+            # with lead data when sync is triggered with a lead's contact_id but email matches.
+            is_same_contact = (cid == (existing_vendor.get('ghl_contact_id') or '').strip())
+            is_vendor_contact = is_vendor_by_ghl_signals(ghl_contact)
+            if is_same_contact or is_vendor_contact:
+                sync_service._update_local_vendor(existing_vendor, ghl_contact)
+                action = "updated"
+            else:
+                logger.warning(
+                    f"⚠️ Contact {contact_id} is not the vendor contact (vendor ghl_contact_id={existing_vendor.get('ghl_contact_id')}); "
+                    "skipping update to avoid overwriting with non-vendor data"
+                )
+                action = "skipped"
         else:
-            # Create new vendor if not exists
-            sync_service._create_local_vendor(ghl_contact)
-            action = "created"
+            # Only create vendor if contact has vendor signals (e.g. tags/source)
+            if is_vendor_by_ghl_signals(ghl_contact):
+                sync_service._create_local_vendor(ghl_contact)
+                action = "created"
+            else:
+                logger.warning(f"⚠️ Contact {contact_id} does not have vendor signals; not creating vendor")
+                action = "skipped"
         
         logger.info(f"✅ Single vendor sync completed: {action}")
         

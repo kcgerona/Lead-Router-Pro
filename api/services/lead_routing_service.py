@@ -3,7 +3,7 @@
 import logging
 import random
 import json
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Iterable
 from datetime import datetime
 from api.services.location_service import location_service
 from api.services.service_categories import service_manager
@@ -25,7 +25,8 @@ class LeadRoutingService:
     
     def find_matching_vendors(self, account_id: str, service_category: str,
                             zip_code: str, priority: str = "normal",
-                            specific_service: str = None, test_mode: bool = False) -> List[Dict[str, Any]]:
+                            specific_service: str = None, test_mode: bool = False,
+                            exclude_ghl_user_ids: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
         """
         Find all vendors that can serve the specified location and service category.
         Enhanced with multi-level service matching for precise vendor routing.
@@ -57,10 +58,16 @@ class LeadRoutingService:
             
             # Get all active vendors for this account
             all_vendors = self._get_vendors_from_database(account_id)
+            excluded_users = set(exclude_ghl_user_ids) if exclude_ghl_user_ids else set()
             eligible_vendors = []
             
             for vendor in all_vendors:
                 vendor_name = vendor.get('company_name', vendor.get('name', 'Unknown'))
+
+                # Skip vendors who have already rejected this lead (don't reassign)
+                if excluded_users and vendor.get('ghl_user_id') and vendor.get('ghl_user_id') in excluded_users:
+                    logger.debug(f"❌ Skipping vendor {vendor_name} - previously rejected this lead")
+                    continue
 
                 # Check vendor status and availability
                 # Test mode: Allow active, pending, and missing_in_ghl vendors for testing

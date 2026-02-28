@@ -3,7 +3,7 @@
 
 import sqlite3
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 import json 
 import uuid 
 from datetime import datetime
@@ -151,6 +151,18 @@ class SimpleDatabase:
                     success BOOLEAN DEFAULT true,
                     error_message TEXT,
                     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            '''))
+            
+            # Create assigned_to_histories table (assignment history per lead/user)
+            session.execute(text('''
+                CREATE TABLE IF NOT EXISTS assigned_to_histories (
+                    id TEXT PRIMARY KEY,
+                    ghl_contact_id TEXT NOT NULL,
+                    ghl_user_id TEXT NOT NULL,
+                    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT 'approved' CHECK (status IN ('approved', 'rejected', 'past-approved', 'past-rejected')),
+                    service_details TEXT
                 )
             '''))
             
@@ -1131,6 +1143,99 @@ class SimpleDatabase:
         finally:
             if conn:
                 conn.close()
+
+    def record_assigned_to_history(
+        self,
+        ghl_contact_id: str,
+        ghl_user_id: str,
+        status: str = "approved",
+        service_details: Optional[Dict[str, Any]] = None,
+        lead_id: Optional[str] = None,
+        opportunity_id: Optional[str] = None,
+        assigned_at: Optional[datetime] = None,
+    ) -> Optional[str]:
+        """
+        Insert a row into assigned_to_histories for an assignment event.
+        Returns the new row id on success, None on failure.
+        """
+        cid = (ghl_contact_id or "").strip()
+        uid = (ghl_user_id or "").strip()
+        if not cid or not uid:
+            logger.warning("record_assigned_to_history: ghl_contact_id and ghl_user_id are required and non-empty")
+            return None
+        session = self._get_conn()
+        try:
+            history_id = str(uuid.uuid4())
+            details = dict(service_details) if service_details else {}
+            if lead_id:
+                details["lead_id"] = lead_id
+            if opportunity_id:
+                details["opportunity_id"] = opportunity_id
+            service_details_json = json.dumps(details) if details else None
+            if status not in ("approved", "rejected", "past-approved", "past-rejected"):
+                status = "approved"
+            if assigned_at is not None:
+                session.execute(
+                    text("""
+                        INSERT INTO assigned_to_histories (id, ghl_contact_id, ghl_user_id, assigned_at, status, service_details)
+                        VALUES (:id, :ghl_contact_id, :ghl_user_id, :assigned_at, :status, :service_details)
+                    """),
+                    {
+                        "id": history_id,
+                        "ghl_contact_id": cid,
+                        "ghl_user_id": uid,
+                        "assigned_at": assigned_at,
+                        "status": status,
+                        "service_details": service_details_json,
+                    },
+                )
+            else:
+                session.execute(
+                    text("""
+                        INSERT INTO assigned_to_histories (id, ghl_contact_id, ghl_user_id, status, service_details)
+                        VALUES (:id, :ghl_contact_id, :ghl_user_id, :status, :service_details)
+                    """),
+                    {
+                        "id": history_id,
+                        "ghl_contact_id": cid,
+                        "ghl_user_id": uid,
+                        "status": status,
+                        "service_details": service_details_json,
+                    },
+                )
+            session.commit()
+            logger.info(f"✅ Recorded assigned_to_histories for contact {cid} -> user {uid}")
+            return history_id
+        except Exception as e:
+            logger.error(f"❌ Error recording assigned_to_history: {e}")
+            session.rollback()
+            return None
+        finally:
+            session.close()
+
+    def get_rejected_ghl_user_ids_for_contact(self, ghl_contact_id: str) -> Set[str]:
+        """
+        Return GHL user IDs of vendors who have rejected this lead (contact).
+        Used to exclude them from auto-assignment so we don't reassign to a vendor who already rejected.
+        """
+        if not ghl_contact_id or not str(ghl_contact_id).strip():
+            return set()
+        session = self._get_conn()
+        try:
+            result = session.execute(
+                text("""
+                    SELECT ghl_user_id FROM assigned_to_histories
+                    WHERE ghl_contact_id = :cid AND status IN ('rejected', 'past-rejected')
+                """),
+                {"cid": ghl_contact_id.strip()},
+            )
+            rows = result.fetchall()
+            return {row[0] for row in rows if row[0]}
+        except Exception as e:
+            logger.error(f"❌ Error getting rejected user IDs for contact {ghl_contact_id}: {e}")
+            return set()
+        finally:
+            session.close()
 
     def get_lead_by_id(self, lead_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific lead by its ID"""

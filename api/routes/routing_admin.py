@@ -11,6 +11,7 @@ from database.simple_connection import db
 from api.services.lead_routing_service import lead_routing_service
 from api.services.ghl_api import GoHighLevelAPI
 from api.routes.webhook_routes import create_lead_from_ghl_contact
+from api.services.assigned_to_history import record_assigned_to_change
 from config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -643,14 +644,29 @@ async def _process_single_unassigned_lead(ghl_lead: Dict[str, Any], account_id: 
             if service_category and zip_code:
                 logger.info(f"🔍 Finding vendors for {service_category} in {zip_code}")
                 
-                # Use the same routing service as webhooks
+                # Exclude vendors who already rejected this lead
+                specific_service = (existing_lead.get("specific_service_requested") if existing_lead else None) or ""
+                if not specific_service and lead_id:
+                    try:
+                        lead_data = db.get_lead_by_ghl_contact_id(contact_id)
+                        if lead_data:
+                            specific_service = lead_data.get("specific_service_requested") or ""
+                    except Exception:
+                        pass
+                rejected_ghl_user_ids = db.get_rejected_ghl_user_ids_for_contact(contact_id) if contact_id else set()
+                if rejected_ghl_user_ids:
+                    logger.info(f"   Excluding {len(rejected_ghl_user_ids)} vendor(s) who previously rejected this lead")
+                
+                # Use the same routing service as webhooks (service match, location, active + taking work, not rejected)
                 from api.services.lead_routing_service import lead_routing_service
                 
                 matching_vendors = lead_routing_service.find_matching_vendors(
                     account_id=account_id,
                     service_category=service_category,
                     zip_code=zip_code,
-                    priority="normal"
+                    priority="normal",
+                    specific_service=specific_service or None,
+                    exclude_ghl_user_ids=rejected_ghl_user_ids
                 )
                 
                 lead_result["matching_vendors_count"] = len(matching_vendors)
@@ -692,6 +708,15 @@ async def _process_single_unassigned_lead(ghl_lead: Dict[str, Any], account_id: 
                                         logger.info(f"✅ Successfully assigned opportunity to {selected_vendor['name']}")
                                         lead_result["assignment_successful"] = True
                                         lead_result["assigned_vendor"] = selected_vendor
+                                        # Record in assigned_to_histories (approved) so rejections can be tracked
+                                        if contact_id and vendor_ghl_user_id:
+                                            record_assigned_to_change(
+                                                ghl_contact_id=contact_id,
+                                                new_ghl_user_id=vendor_ghl_user_id,
+                                                previous_ghl_user_id=None,
+                                                service_details={"lead_id": lead_id, "opportunity_id": opportunity_id},
+                                                status="approved",
+                                            )
                                     else:
                                         logger.error(f"❌ Failed to update opportunity assignment")
                                         lead_result["error_message"] = "Failed to update GHL opportunity"

@@ -329,17 +329,22 @@ class LeadReassignmentCore:
                 finally:
                     conn.close()
             
-            # Step 5: Find matching vendors (exclude previous if requested)
+            # Step 5: Find matching vendors (exclude previous + vendors who rejected this lead)
             # Use specific service for matching if available, otherwise use category
             service_to_match = specific_service if specific_service else service_category
             logger.info(f"🔍 Searching for vendors matching: '{service_to_match}' in ZIP {zip_code}")
+            
+            rejected_ghl_user_ids = simple_db_instance.get_rejected_ghl_user_ids_for_contact(contact_id) if contact_id else set()
+            if rejected_ghl_user_ids:
+                logger.info(f"   Excluding {len(rejected_ghl_user_ids)} vendor(s) who previously rejected this lead")
             
             available_vendors = self.lead_routing.find_matching_vendors(
                 account_id=account_id,
                 service_category=service_to_match.split(" - ")[0] if " - " in service_to_match else service_to_match,
                 zip_code=zip_code,
                 priority='high',
-                specific_service=service_to_match
+                specific_service=service_to_match,
+                exclude_ghl_user_ids=rejected_ghl_user_ids
             )
             
             if not available_vendors:
